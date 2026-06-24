@@ -1,11 +1,54 @@
 import type {
+  BillingUnit,
   IncidentSeverity,
   IncidentStatus,
   IncidentType,
+  InterventionStatus,
   Platform,
+  ServiceCategory,
   TaskPriority,
   TaskStatus,
 } from "./types";
+
+export const BILLING_UNIT_LABEL: Record<BillingUnit, string> = {
+  heure: "Heure",
+  forfait: "Forfait",
+  intervention: "Intervention",
+  nuitee: "Nuitée",
+  logement: "Logement",
+};
+
+export const SERVICE_CATEGORY_LABEL: Record<ServiceCategory, string> = {
+  menage: "Ménage",
+  blanchisserie: "Blanchisserie",
+  linge: "Location de linge",
+  jardin: "Jardin / Extérieur",
+  maintenance: "Maintenance",
+  autre: "Autre",
+};
+
+export const SERVICE_CATEGORY_BADGE: Record<ServiceCategory, string> = {
+  menage: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+  blanchisserie: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  linge: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
+  jardin: "bg-green-600/15 text-green-700 dark:text-green-400",
+  maintenance: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  autre: "bg-muted text-muted-foreground",
+};
+
+export const INTERVENTION_STATUS_LABEL: Record<InterventionStatus, string> = {
+  planned: "Planifiée",
+  done: "Réalisée",
+  invoiced: "Facturée",
+  cancelled: "Annulée",
+};
+
+export const INTERVENTION_STATUS_BADGE: Record<InterventionStatus, string> = {
+  planned: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  done: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  invoiced: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+  cancelled: "bg-muted text-muted-foreground",
+};
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   todo: "À attribuer",

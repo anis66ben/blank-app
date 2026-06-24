@@ -2,12 +2,14 @@
 
 import {
   AlertTriangle,
+  BarChart3,
   Building2,
   CalendarRange,
+  ConciergeBell,
   LayoutDashboard,
   ListChecks,
-  Sparkles,
   Users,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,7 +22,9 @@ const nav = [
   { href: "/properties", label: "Logements", icon: Building2 },
   { href: "/providers", label: "Prestataires", icon: Users },
   { href: "/incidents", label: "Incidents", icon: AlertTriangle },
-  { href: "/assistant", label: "Assistant IA", icon: Sparkles },
+  { href: "/activity", label: "Activité & Revenus", icon: BarChart3 },
+  { href: "/services", label: "Catalogue prestations", icon: ConciergeBell },
+  { href: "/assistant", label: "IA & Assistant", icon: Zap },
 ];
 
 export function Sidebar() {
@@ -30,7 +34,7 @@ export function Sidebar() {
     <aside className="hidden w-64 shrink-0 border-r bg-card/40 md:flex md:flex-col">
       <div className="flex h-16 items-center gap-2 border-b px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Sparkles className="h-4 w-4" />
+          <Zap className="h-4 w-4" />
         </div>
         <div>
           <p className="text-sm font-semibold leading-tight">Concierge Flow</p>
@@ -38,7 +42,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 p-3">
+      <nav className="flex-1 space-y-1 overflow-y-auto p-3">
         {nav.map((item) => {
           const active =
             item.href === "/"

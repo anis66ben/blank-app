@@ -1,10 +1,12 @@
 import type {
   CleaningTask,
   Incident,
+  Intervention,
   Message,
   Property,
   Provider,
   Reservation,
+  ServiceType,
   User,
 } from "./types";
 
@@ -43,11 +45,11 @@ export const properties: Property[] = [
 ];
 
 export const providers: Provider[] = [
-  { id: "pr1", name: "Fatima Z.", phone: "+33633333333", zone: "Chamonix", rating: 4.8, availabilityScore: 0.9, currentLoad: 1 },
-  { id: "pr2", name: "Léa Dubois", phone: "+33655555555", zone: "Chamonix", rating: 4.5, availabilityScore: 0.6, currentLoad: 3 },
-  { id: "pr3", name: "Sofiane K.", phone: "+33666666666", zone: "Megève", rating: 4.2, availabilityScore: 0.8, currentLoad: 2 },
-  { id: "pr4", name: "Marta Silva", phone: "+33677777777", zone: "Annecy", rating: 4.9, availabilityScore: 0.7, currentLoad: 0 },
-  { id: "pr5", name: "Yanis B.", phone: "+33688888888", zone: "Megève", rating: 4.0, availabilityScore: 0.5, currentLoad: 4 },
+  { id: "pr1", name: "Fatima Z.", phone: "+33633333333", zone: "Chamonix", rating: 4.8, availabilityScore: 0.9, currentLoad: 1, hourlyRate: 18 },
+  { id: "pr2", name: "Léa Dubois", phone: "+33655555555", zone: "Chamonix", rating: 4.5, availabilityScore: 0.6, currentLoad: 3, hourlyRate: 16 },
+  { id: "pr3", name: "Sofiane K.", phone: "+33666666666", zone: "Megève", rating: 4.2, availabilityScore: 0.8, currentLoad: 2, hourlyRate: 17 },
+  { id: "pr4", name: "Marta Silva", phone: "+33677777777", zone: "Annecy", rating: 4.9, availabilityScore: 0.7, currentLoad: 0, hourlyRate: 19 },
+  { id: "pr5", name: "Yanis B.", phone: "+33688888888", zone: "Megève", rating: 4.0, availabilityScore: 0.5, currentLoad: 4, hourlyRate: 15 },
 ];
 
 export const reservations: Reservation[] = [
@@ -86,3 +88,69 @@ export const messages: Message[] = [
   { id: "m3", providerId: "pr1", propertyId: "p1", taskId: "t1", direction: "in", content: "Ménage terminé ✅ photos jointes", mediaUrl: PHOTO("photo-1556228453-efd6c1ff04f6"), createdAt: at(0, 13, 25) },
   { id: "m4", providerId: "pr2", propertyId: "p6", taskId: "t5", direction: "in", content: "Problème : fuite sous l'évier, je signale un incident.", mediaUrl: PHOTO("photo-1607472586893-edb57bdc0e39"), createdAt: at(0, 9, 45) },
 ];
+
+// ─── Catalogue de prestations ─────────────────────────────────────────────────
+
+export const serviceTypes: ServiceType[] = [
+  { id: "s1", name: "Ménage standard", price: 120, unit: "forfait", category: "menage" },
+  { id: "s2", name: "Ménage grande capacité", price: 180, unit: "forfait", category: "menage" },
+  { id: "s3", name: "Blanchisserie", price: 35, unit: "intervention", category: "blanchisserie" },
+  { id: "s4", name: "Location de linge (kit)", price: 25, unit: "nuitee", category: "linge" },
+  { id: "s5", name: "Tonte de gazon", price: 60, unit: "intervention", category: "jardin" },
+  { id: "s6", name: "Entretien extérieur", price: 45, unit: "heure", category: "jardin" },
+  { id: "s7", name: "Maintenance légère", price: 50, unit: "heure", category: "maintenance" },
+  { id: "s8", name: "Contrôle qualité", price: 40, unit: "forfait", category: "menage" },
+  { id: "s9", name: "Accueil voyageurs", price: 30, unit: "intervention", category: "autre" },
+];
+
+// ─── 30 jours d'historique d'interventions (déterministe) ────────────────────
+
+const PROP_IDS = ["p1", "p2", "p3", "p4", "p5", "p6"];
+const PROV_IDS = ["pr1", "pr2", "pr3", "pr4", "pr5"];
+// Pattern par jour : [propertyIdx, serviceIdx, providerIdx, durationMin, amountBilled, status]
+// 5 interventions par jour, statut "done" ou "invoiced" pour l'historique.
+const DAILY_PATTERN: [number, number, number, number, number][] = [
+  [0, 0, 0, 150, 120],
+  [1, 0, 1, 120, 120],
+  [2, 1, 2, 180, 180],
+  [3, 2, 3, 45, 35],
+  [4, 3, 4, 30, 25],
+];
+
+function buildInterventions(): Intervention[] {
+  const result: Intervention[] = [];
+  for (let day = -29; day <= -1; day++) {
+    const d = new Date();
+    d.setDate(d.getDate() + day);
+    d.setHours(0, 0, 0, 0);
+    const dateStr = d.toISOString();
+    DAILY_PATTERN.forEach(([pi, si, pri, dur, amount], idx) => {
+      // Vary amounts slightly using day offset to make charts interesting
+      const factor = 1 + ((((day + 29) * (idx + 1)) % 5) - 2) * 0.06;
+      const billedAmount = Math.round(amount * factor);
+      result.push({
+        id: `iv${Math.abs(day)}_${idx}`,
+        propertyId: PROP_IDS[pi % PROP_IDS.length],
+        serviceTypeId: serviceTypes[si % serviceTypes.length].id,
+        taskId: null,
+        providerId: PROV_IDS[pri % PROV_IDS.length],
+        date: dateStr,
+        durationMinutes: dur,
+        amountBilled: billedAmount,
+        status: day < -3 ? "invoiced" : "done",
+        notes: "",
+      });
+    });
+  }
+  // Interventions du jour (planifiées et réalisées)
+  result.push(
+    { id: "iv_today_0", propertyId: "p1", serviceTypeId: "s1", taskId: "t1", providerId: "pr1", date: dateOnly(0), durationMinutes: 150, amountBilled: 120, status: "done", notes: "" },
+    { id: "iv_today_1", propertyId: "p2", serviceTypeId: "s3", taskId: null, providerId: "pr2", date: dateOnly(0), durationMinutes: 45, amountBilled: 35, status: "planned", notes: "" },
+    { id: "iv_today_2", propertyId: "p3", serviceTypeId: "s2", taskId: "t3", providerId: "pr3", date: dateOnly(0), durationMinutes: 180, amountBilled: 180, status: "planned", notes: "" },
+    { id: "iv_today_3", propertyId: "p4", serviceTypeId: "s1", taskId: "t4", providerId: "pr4", date: dateOnly(0), durationMinutes: 90, amountBilled: 120, status: "done", notes: "" },
+    { id: "iv_today_4", propertyId: "p6", serviceTypeId: "s4", taskId: null, providerId: "pr1", date: dateOnly(0), durationMinutes: 30, amountBilled: 50, status: "planned", notes: "" },
+  );
+  return result;
+}
+
+export const interventions: Intervention[] = buildInterventions();
