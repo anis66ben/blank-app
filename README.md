@@ -4,7 +4,8 @@ Plateforme de rencontre sérieuse (en vue du mariage) utilisant **Telegram** com
 interface principale. Le bot construit un **profil riche** de chaque membre à
 travers des **conversations naturelles** (propulsées par l'API Claude), propose
 des profils compatibles grâce à un **moteur de matching**, anime la communauté,
-et fournit à l'administrateur un **tableau de bord web complet** (Streamlit).
+et fournit à l'administrateur un **tableau de bord web local** (FastAPI, aucun
+service externe requis).
 
 ## Fonctionnalités
 
@@ -34,20 +35,27 @@ et fournit à l'administrateur un **tableau de bord web complet** (Streamlit).
 - Chaque paire reçoit un **score 0-100** avec décomposition consultable dans le
   dashboard.
 
-### 🖥️ Tableau de bord administrateur (`streamlit_app.py`)
+### 🖥️ Tableau de bord administrateur local (`app/webadmin.py`)
+Backend **FastAPI** qui tourne en local et sert à la fois une **API REST**
+(`/api/…`, documentation interactive sur `/api/docs`) et une **interface web**
+(`http://localhost:8000`) :
 - **Statistiques** : total, répartition H/F, actifs, incomplets, nouveaux
   inscrits, matchs générés, taux d'acceptation, graphiques.
 - **Utilisateurs** : recherche avancée (âge, sexe, ville, département, pays,
   situation, profession, complétude, statut), fiche détaillée complète.
 - **Matchs** : proposés / acceptés / refusés, scores et décomposition.
 - **Conversations** : historique bot ↔ membre (accès encadré, mention RGPD).
-- Protégé par mot de passe (`ADMIN_PASSWORD`).
+- Protégé par mot de passe (`ADMIN_PASSWORD`, authentification HTTP Basic —
+  l'identifiant est libre).
 
 ## Installation
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # puis renseignez les valeurs
+cp .env.example .env
+# puis éditez .env et renseignez les valeurs
 ```
 
 Variables indispensables dans `.env` :
@@ -63,10 +71,11 @@ Variables indispensables dans `.env` :
 
 ```bash
 # 1. Le bot Telegram (conversations + matching + animation)
-python -m app.bot
+python3 -m app.bot
 
-# 2. Le tableau de bord admin (dans un autre terminal)
-streamlit run streamlit_app.py
+# 2. Le tableau de bord admin local (dans un autre terminal)
+python3 -m app.webadmin
+# puis ouvrez http://localhost:8000  (API REST : http://localhost:8000/api/docs)
 ```
 
 Le bot et le dashboard partagent la même base SQLite (`data/app.db` par défaut,
@@ -77,7 +86,7 @@ configurable via `DATABASE_URL` — PostgreSQL supporté).
 Pour tester le matching et le dashboard sans attendre de vrais utilisateurs :
 
 ```bash
-python -m scripts.seed_demo
+python3 -m scripts.seed_demo
 ```
 
 ## Architecture
@@ -89,8 +98,9 @@ app/
 ├── profile_schema.py  # schéma du profil, pondérations de l'indice 0-100
 ├── ai.py              # conversation + extraction structurée (API Claude)
 ├── matching.py        # moteur de compatibilité 3 niveaux
-└── bot.py             # bot Telegram (handlers + jobs planifiés)
-streamlit_app.py       # tableau de bord administrateur
+├── bot.py             # bot Telegram (handlers + jobs planifiés)
+├── webadmin.py        # backend admin local (FastAPI : API REST + interface web)
+└── static/admin.html  # interface web du tableau de bord
 scripts/seed_demo.py   # données de démonstration
 ```
 
