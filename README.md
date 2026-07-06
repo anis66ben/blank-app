@@ -1,19 +1,103 @@
-# 🎈 Blank app template
+# 🌙 Plateforme de mise en relation entre musulmans — Bot Telegram + Dashboard admin
 
-A simple Streamlit app template for you to modify!
+Plateforme de rencontre sérieuse (en vue du mariage) utilisant **Telegram** comme
+interface principale. Le bot construit un **profil riche** de chaque membre à
+travers des **conversations naturelles** (propulsées par l'API Claude), propose
+des profils compatibles grâce à un **moteur de matching**, anime la communauté,
+et fournit à l'administrateur un **tableau de bord web complet** (Streamlit).
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+## Fonctionnalités
 
-### How to run it on your own machine
+### 🤖 Bot Telegram (`app/bot.py`)
+- **Collecte intelligente et progressive** : pas de long questionnaire — le bot
+  pose une question à la fois, rebondit sur les réponses ("Tu aimes voyager ?
+  Quel pays t'a le plus marqué ?") et enrichit le profil au fil des jours.
+- **Mémoire conversationnelle** : historique persistant, sujets déjà abordés
+  jamais reposés, notes mémorisées ré-utilisées dans les échanges suivants.
+- **Indice de connaissance du profil (0-100)** : calculé en continu ; le bot
+  cible en priorité les informations manquantes et relance en douceur les
+  profils incomplets (job automatique).
+- **Suggestions de match** : quand un score dépasse le seuil, chaque membre
+  reçoit une carte anonymisée avec boutons *Plus d'infos / Accepter / Refuser /
+  Plus tard*. En cas d'accord mutuel, mise en relation automatique.
+- **Animation communautaire** (si `COMMUNITY_CHAT_ID` est défini) : rotation
+  quotidienne — question de réflexion, sondage, quiz, statistiques anonymisées,
+  profil de la semaine, rappel des règles.
+- Commandes : `/start`, `/profil`, `/aide`, `/pause`, `/reprendre`.
 
-1. Install the requirements
+### 💘 Moteur de matching (`app/matching.py`)
+- **Obligatoires** (éliminatoires) : sexes opposés, majorité, tranche d'âge,
+  complétude minimale des deux profils.
+- **Importantes** (70 pts) : pratique religieuse, projet de famille,
+  localisation, personnalité.
+- **Secondaires** (30 pts) : centres d'intérêt, habitudes de vie, proximité d'âge.
+- Chaque paire reçoit un **score 0-100** avec décomposition consultable dans le
+  dashboard.
 
-   ```
-   $ pip install -r requirements.txt
-   ```
+### 🖥️ Tableau de bord administrateur (`streamlit_app.py`)
+- **Statistiques** : total, répartition H/F, actifs, incomplets, nouveaux
+  inscrits, matchs générés, taux d'acceptation, graphiques.
+- **Utilisateurs** : recherche avancée (âge, sexe, ville, département, pays,
+  situation, profession, complétude, statut), fiche détaillée complète.
+- **Matchs** : proposés / acceptés / refusés, scores et décomposition.
+- **Conversations** : historique bot ↔ membre (accès encadré, mention RGPD).
+- Protégé par mot de passe (`ADMIN_PASSWORD`).
 
-2. Run the app
+## Installation
 
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # puis renseignez les valeurs
+```
+
+Variables indispensables dans `.env` :
+
+| Variable | Description |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Jeton obtenu auprès de [@BotFather](https://t.me/BotFather) |
+| `ANTHROPIC_API_KEY` | Clé API [Claude](https://platform.claude.com) |
+| `ADMIN_PASSWORD` | Mot de passe du dashboard |
+| `COMMUNITY_CHAT_ID` | *(optionnel)* ID du groupe pour l'animation |
+
+## Lancement
+
+```bash
+# 1. Le bot Telegram (conversations + matching + animation)
+python -m app.bot
+
+# 2. Le tableau de bord admin (dans un autre terminal)
+streamlit run streamlit_app.py
+```
+
+Le bot et le dashboard partagent la même base SQLite (`data/app.db` par défaut,
+configurable via `DATABASE_URL` — PostgreSQL supporté).
+
+## Données de démonstration
+
+Pour tester le matching et le dashboard sans attendre de vrais utilisateurs :
+
+```bash
+python -m scripts.seed_demo
+```
+
+## Architecture
+
+```
+app/
+├── config.py          # configuration (.env)
+├── db.py              # modèles SQLAlchemy (users, profils, messages, matchs…)
+├── profile_schema.py  # schéma du profil, pondérations de l'indice 0-100
+├── ai.py              # conversation + extraction structurée (API Claude)
+├── matching.py        # moteur de compatibilité 3 niveaux
+└── bot.py             # bot Telegram (handlers + jobs planifiés)
+streamlit_app.py       # tableau de bord administrateur
+scripts/seed_demo.py   # données de démonstration
+```
+
+## Respect des données personnelles
+
+- L'accès aux conversations depuis le dashboard est réservé à la modération
+  (signalements, sécurité) — informez vos membres dans vos CGU et conformez-vous
+  au RGPD (droit d'accès, de rectification et d'effacement).
+- Les publications communautaires (profil de la semaine, statistiques) sont
+  anonymisées.
