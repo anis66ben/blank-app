@@ -209,8 +209,12 @@ def index() -> FileResponse:
 
 
 def main() -> None:
+    import os
+
     import uvicorn
-    uvicorn.run("app.webadmin:app", host="127.0.0.1", port=8000, reload=False)
+    host = os.getenv("WEBADMIN_HOST", "127.0.0.1")
+    port = int(os.getenv("WEBADMIN_PORT", "8000"))
+    uvicorn.run("app.webadmin:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

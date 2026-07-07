@@ -14,7 +14,8 @@
   body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
          background: var(--bg); color: var(--text); }
   header { background: var(--card); border-bottom: 1px solid var(--border);
-           padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+           padding: 14px 24px; display: flex; align-items: center; gap: 16px;
+           flex-wrap: wrap; }
   header h1 { font-size: 18px; margin: 0; }
   nav { display: flex; gap: 4px; margin-left: 24px; }
   nav button { border: none; background: none; padding: 8px 14px; font-size: 14px;
@@ -51,7 +52,13 @@
   .progress { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
   .progress > div { height: 100%; background: var(--accent); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  @media (max-width: 800px) {
+    .grid2 { grid-template-columns: 1fr; }
+    main { padding: 0 10px; margin-top: 12px; }
+    header { padding: 10px 12px; } header h1 { font-size: 15px; }
+    nav { margin-left: 0; } nav button { padding: 6px 10px; font-size: 13px; }
+    table { font-size: 12px; } th, td { padding: 6px; }
+  }
   dl { margin: 0; } dt { font-size: 11px; color: var(--muted); margin-top: 8px; }
   dd { margin: 1px 0 0; font-size: 14px; }
   .chat { max-height: 480px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
@@ -132,10 +139,10 @@
       <option value="">Tous</option><option value="proposed">Proposés</option>
       <option value="mutual">Acceptés (mutuels)</option><option value="refused">Refusés</option>
     </select></h2>
-    <table id="matches-table">
+    <div style="overflow-x:auto"><table id="matches-table">
       <thead><tr><th>ID</th><th>Homme</th><th>Femme</th><th>Score</th>
       <th>Réponse (H)</th><th>Réponse (F)</th><th>Statut</th><th>Créé le</th></tr></thead>
-      <tbody></tbody></table>
+      <tbody></tbody></table></div>
   </div>
   <div class="panel hidden" id="match-detail-panel">
     <h2>Décomposition du score</h2><div id="match-details"></div>

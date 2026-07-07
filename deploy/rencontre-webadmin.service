@@ -1,0 +1,19 @@
+[Unit]
+Description=Interface d'administration web — plateforme de rencontre
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rencontre
+WorkingDirectory=/opt/rencontre
+ExecStart=/opt/rencontre/.venv/bin/python -m app.webadmin
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/rencontre/data
+
+[Install]
+WantedBy=multi-user.target
