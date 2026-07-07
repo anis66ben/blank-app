@@ -150,6 +150,17 @@ def find_new_matches(session) -> list[Match]:
             if not hard_filters_ok(pm, pf):
                 continue
             score, details = compatibility(pm, pf)
+
+            # Préférences déduites des réactions (charte §11) : les préférences
+            # confirmées de chacun ajustent le score face au profil de l'autre.
+            from . import preferences as prefs
+            adj_m, reasons_m = prefs.matching_adjustment(session, pm.user_id, pf)
+            adj_f, reasons_f = prefs.matching_adjustment(session, pf.user_id, pm)
+            if adj_m or adj_f:
+                details["preferences_deduites"] = round(adj_m + adj_f, 1)
+                details["preferences_detail"] = {"homme": reasons_m, "femme": reasons_f}
+                score = round(max(min(score + adj_m + adj_f, 100), 0), 1)
+
             if score >= config.MATCH_THRESHOLD:
                 match = Match(user_m_id=pm.user_id, user_f_id=pf.user_id,
                               score=score, details=details)

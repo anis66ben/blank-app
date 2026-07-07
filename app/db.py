@@ -114,6 +114,24 @@ class AskedQuestion(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Preference(Base):
+    """Mémoire structurée des préférences (charte IA §9-10) : chaque signal
+    observé dans les réactions renforce une hypothèse, avec niveau de confiance."""
+    __tablename__ = "preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.telegram_id"), index=True)
+    # valeurs / vision_couple / personnalite / mode_de_vie / preference_profil
+    dimension: Mapped[str] = mapped_column(String(32))
+    key: Mapped[str] = mapped_column(String(80))              # ex: "famille", "profil calme"
+    orientation: Mapped[str] = mapped_column(String(16))      # favorable / defavorable / reserve
+    score: Mapped[int | None] = mapped_column(Integer)        # 0-10 pour les valeurs
+    occurrences: Mapped[int] = mapped_column(Integer, default=1)
+    confidence: Mapped[int] = mapped_column(Integer, default=35)   # % (35 = hypothèse faible)
+    last_evidence: Mapped[str | None] = mapped_column(String(300)) # dernier indice observé
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class Match(Base):
     __tablename__ = "matches"
 

@@ -133,17 +133,25 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ---------------------------------------------------------------------------
 # Suggestions de match
 # ---------------------------------------------------------------------------
-def _match_card(profile: Profile, score: float) -> str:
-    interests = ", ".join((profile.interests or [])[:4])
-    traits = ", ".join((profile.personality_traits or [])[:4])
+def _match_card(profile: Profile, score: float, narrative: str | None = None) -> str:
+    """Carte de suggestion. Avec IA : présentation narrative (charte §6) ;
+    sinon : fiche factuelle."""
+    if narrative:
+        body = (f"{narrative}\n\n"
+                f"({profile.age or '—'} ans, {profile.city or '—'}, "
+                f"{profile.marital_status or '—'})")
+    else:
+        interests = ", ".join((profile.interests or [])[:4])
+        traits = ", ".join((profile.personality_traits or [])[:4])
+        body = (f"• Âge : {profile.age or '—'} ans\n"
+                f"• Ville : {profile.city or '—'} ({profile.country or '—'})\n"
+                f"• Profession : {profile.profession or '—'}\n"
+                f"• Situation : {profile.marital_status or '—'}\n"
+                f"• Personnalité : {traits or '—'}\n"
+                f"• Centres d'intérêt : {interests or '—'}")
     return (
         "💫 *Nous avons identifié un profil susceptible de correspondre à tes attentes.*\n\n"
-        f"• Âge : {profile.age or '—'} ans\n"
-        f"• Ville : {profile.city or '—'} ({profile.country or '—'})\n"
-        f"• Profession : {profile.profession or '—'}\n"
-        f"• Situation : {profile.marital_status or '—'}\n"
-        f"• Personnalité : {traits or '—'}\n"
-        f"• Centres d'intérêt : {interests or '—'}\n\n"
+        f"{body}\n\n"
         f"Compatibilité estimée : *{round(score)}%*\n"
         "Que souhaites-tu faire ?"
     )
@@ -178,9 +186,10 @@ async def job_matching(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for match_id, m_id, f_id, score, pm, pf in new_matches:
         for recipient, other in [(m_id, pf), (f_id, pm)]:
+            narrative = await asyncio.to_thread(ai.generate_profile_presentation, other)
             try:
                 await context.bot.send_message(
-                    chat_id=recipient, text=_match_card(other, score),
+                    chat_id=recipient, text=_match_card(other, score, narrative),
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=_match_keyboard(match_id))
             except TelegramError:
@@ -234,8 +243,25 @@ async def on_match_button(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "refused": "❌ C'est noté, merci pour ta franchise. Je continue mes recherches pour toi.",
         "postponed": "🕐 Très bien, je te reproposerai ce profil plus tard.",
     }
+    # Recueil du ressenti (charte §2 et §7) : la réaction au profil est la
+    # source d'information la plus précieuse pour affiner les suggestions.
+    followups = {
+        "accepted": "Qu'est-ce qui t'a le plus parlé dans ce profil ?",
+        "refused": "Peux-tu me dire ce qui ne correspondait pas ? Cela m'aidera "
+                   "à te proposer des profils plus justes.",
+        "postponed": "Qu'est-ce qui te fait hésiter sur ce profil ? Ton ressenti "
+                     "m'aide à mieux comprendre ce qui compte pour toi.",
+    }
     await query.edit_message_reply_markup(None)
-    await query.message.reply_text(confirmations.get(response, "C'est noté."))
+    reply = confirmations.get(response, "C'est noté.")
+    if ai.ai_enabled() and response in followups:
+        reply += "\n\n" + followups[response]
+
+        def _log(uid=responder_id, text=reply):
+            with db_session() as session:
+                session.add(Message(user_id=uid, role="assistant", content=text))
+        await asyncio.to_thread(_log)
+    await query.message.reply_text(reply)
 
     # Mise en relation mutuelle
     if match.status == "mutual":

@@ -143,6 +143,18 @@ class ProfileUpdates(BaseModel):
                                        description="Habitudes de vie, ex: 'sportif', 'ne fume pas'")
 
 
+class PreferenceSignal(BaseModel):
+    """Signal implicite ou explicite détecté dans une réaction de l'utilisateur
+    (charte IA §7-8). N'émettre un signal QUE s'il ressort réellement du message."""
+    dimension: str = Field(description="'valeurs', 'vision_couple', 'personnalite', "
+                                       "'mode_de_vie' ou 'preference_profil'")
+    cle: str = Field(description="Objet du signal, court et réutilisable, "
+                                 "ex: 'famille', 'profil calme', 'distance geographique'")
+    orientation: str = Field(description="'favorable', 'defavorable' ou 'reserve'")
+    score: Optional[int] = Field(None, description="Importance 0-10, surtout pour les valeurs")
+    indice: Optional[str] = Field(None, description="Citation courte du message qui fonde ce signal")
+
+
 class BotTurn(BaseModel):
     """Réponse complète du bot pour un tour de conversation."""
     reply: str = Field(description="Message à envoyer à l'utilisateur, en français, chaleureux et naturel")
@@ -152,3 +164,6 @@ class BotTurn(BaseModel):
     memory_notes: List[str] = Field(
         default_factory=list,
         description="Faits importants à mémoriser pour les prochaines conversations")
+    preference_signals: List[PreferenceSignal] = Field(
+        default_factory=list,
+        description="Signaux de préférence détectés dans la réaction (analyse implicite, charte §7)")

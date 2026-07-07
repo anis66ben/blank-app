@@ -61,45 +61,65 @@ def profile_snapshot(profile: Profile) -> dict:
     }
 
 
-def build_system_prompt(profile: Profile, asked_topics: list[str]) -> str:
+def build_system_prompt(profile: Profile, asked_topics: list[str],
+                        preferences_summary: str = "",
+                        match_context: str = "") -> str:
     missing = missing_fields(profile)
     next_targets = [FIELD_LABELS.get(f, f) for f in missing[:3]]
     snapshot = json.dumps(profile_snapshot(profile), ensure_ascii=False, indent=2)
     asked = ", ".join(asked_topics) if asked_topics else "aucune"
 
-    return f"""Tu es l'assistant d'une plateforme de rencontre sérieuse entre musulmans et musulmanes en vue du mariage. Tu discutes en privé, en français, avec un membre pour apprendre à le connaître progressivement.
+    return f"""Tu es l'assistant IA d'une communauté Telegram de rencontre sérieuse entre musulmans et musulmanes en vue du mariage. Tu fonctionnes comme un conseiller de mise en relation expérimenté. Tu discutes en privé, en français, avec un membre.
 
-RÈGLES DE CONVERSATION
-- Ton chaleureux, respectueux et naturel, conforme à l'éthique musulmane (pas de familiarité déplacée).
-- UNE seule question par message, jamais plus. La conversation doit rester légère, pas un interrogatoire.
-- Ne repose JAMAIS une question déjà posée (sujets déjà abordés : {asked}). Si l'information est déjà dans le profil, ne la redemande pas.
-- Rebondis sur les réponses pour approfondir (ex. s'il aime voyager, demande quel type de voyage, puis quel pays l'a marqué).
-- Fais parfois référence à des éléments mémorisés lors d'échanges précédents pour montrer que tu te souviens.
-- Réponds d'abord à ce que dit la personne (question, émotion, remarque), puis enchaîne naturellement.
-- Si la personne ne veut pas répondre à une question, respecte-le et passe à autre chose.
-- Ne donne jamais de conseil médical, juridique ou de fatwa ; reste sur ton rôle de mise en relation.
-- Ne communique jamais l'identité d'autres membres dans cette conversation.
+TON RÔLE (charte du projet)
+- Ton rôle EST : observer, comprendre, analyser, structurer les informations, améliorer progressivement la qualité des suggestions.
+- Ton rôle N'EST PAS : convaincre, vendre un profil, pousser deux personnes à se rencontrer, juger.
+- Tu ne manipules jamais, tu n'exagères jamais une compatibilité, tu ne caches pas une information importante, tu ne fais pas de diagnostic psychologique, et tu ne présentes JAMAIS une supposition comme une certitude.
+- Tu es respectueux, neutre, bienveillant, et tu respectes les convictions religieuses.
 
-COLLECTE PROGRESSIVE
-Le profil s'enrichit au fil des jours : d'abord l'identité générale, puis la situation personnelle, le projet de mariage et de famille, la pratique religieuse, la personnalité, et enfin les centres d'intérêt et habitudes de vie ({", ".join(CATEGORY_LABELS.values())}).
-Prochaines informations à découvrir en priorité : {", ".join(next_targets) if next_targets else "le profil est très complet — approfondis la personnalité et les projets"}.
+PHILOSOPHIE : PAS DE FORMULAIRE
+- L'utilisateur ne doit jamais avoir l'impression de remplir un questionnaire.
+- Les informations les plus précieuses viennent de ses RÉACTIONS : commentaires sur les profils proposés, remarques positives ou négatives, hésitations, priorités exprimées naturellement. Une personne révèle mieux ses préférences en analysant un exemple concret qu'en répondant à une question abstraite.
+- Quand un profil vient de lui être proposé (voir CONTEXTE plus bas), recueille son ressenti et analyse-le en profondeur plutôt que de poser des questions de profil.
+- Ne redemande JAMAIS une information déjà connue (profil ci-dessous, sujets déjà abordés : {asked}).
+- UNE seule question par message maximum ; parfois aucune, juste un échange naturel.
+- Rebondis sur les réponses pour approfondir ; fais référence aux éléments mémorisés pour montrer que tu te souviens.
+- Réponds d'abord à ce que dit la personne (question, émotion), puis enchaîne naturellement.
+- Si la personne ne veut pas répondre, respecte-le et passe à autre chose.
+- Pas de conseil médical, juridique, ni de fatwa. Ne révèle jamais l'identité d'autres membres.
+
+ANALYSE DES RÉACTIONS (dimensions à observer)
+A. Valeurs : famille, spiritualité, stabilité, ambition, simplicité, générosité, transmission.
+B. Vision du couple : attentes envers le conjoint, partage des responsabilités, communication, gestion des conflits, place des familles.
+C. Personnalité relationnelle : besoin de communication, sociabilité, indépendance, expression des émotions, gestion des désaccords.
+D. Mode de vie : rythme quotidien, loisirs, travail, sorties, environnement familial.
+Chaque réaction significative produit des `preference_signals`. Jamais de conclusion définitive sur une seule réaction : le système renforce les hypothèses par répétition.
+
+COLLECTE PROGRESSIVE (en complément des réactions)
+Champs encore inconnus, à découvrir en douceur quand la conversation s'y prête : {", ".join(next_targets) if next_targets else "profil très complet — privilégie l'analyse des réactions et l'approfondissement"}.
+Ordre général : {", ".join(CATEGORY_LABELS.values())}.
 
 PROFIL ACTUEL (indice de connaissance : {profile.completeness}/100)
 {snapshot}
 
+MÉMOIRE STRUCTURÉE DES PRÉFÉRENCES (apprise des réactions)
+{preferences_summary or "Aucune préférence apprise pour le moment."}
+{match_context}
 SORTIE STRUCTURÉE
 - `reply` : ton message (2 à 4 phrases maximum).
-- `updates` : uniquement les faits réellement communiqués par la personne dans son dernier message (ne devine rien).
-- `asked_topic` : la clé du champ de profil visé par ta question (ex. "profession"), ou null si tu n'as pas posé de question.
-- `memory_notes` : faits marquants à retenir pour les prochaines conversations (max 2).
+- `updates` : uniquement les faits réellement communiqués dans le dernier message (ne devine rien).
+- `asked_topic` : clé du champ visé par ta question, ou null.
+- `memory_notes` : faits marquants à retenir (max 2).
+- `preference_signals` : signaux détectés dans la réaction (dimension, clé courte réutilisable, orientation favorable/defavorable/reserve, score 0-10 pour les valeurs, indice = courte citation). N'en émets que si le message en contient réellement.
 
 Date du jour : {dt.date.today().isoformat()}."""
 
 
-def converse(profile: Profile, history: list[dict], asked_topics: list[str]) -> BotTurn:
+def converse(profile: Profile, history: list[dict], asked_topics: list[str],
+             preferences_summary: str = "", match_context: str = "") -> BotTurn:
     """Appelle Claude et renvoie la réponse structurée du tour."""
     client = get_client()
-    system = build_system_prompt(profile, asked_topics)
+    system = build_system_prompt(profile, asked_topics, preferences_summary, match_context)
     response = client.messages.parse(
         model=config.CLAUDE_MODEL,
         max_tokens=2048,
@@ -171,14 +191,88 @@ def handle_user_message(session, user: User, text: str) -> str:
     asked_topics = [q.topic for q in session.query(AskedQuestion)
                     .filter(AskedQuestion.user_id == user.telegram_id).all()]
 
-    turn = converse(profile, history, asked_topics)
+    from . import preferences as prefs
+    pref_summary = prefs.summary_for_prompt(session, user.telegram_id)
+    match_context = _recent_match_context(session, user.telegram_id)
+
+    turn = converse(profile, history, asked_topics, pref_summary, match_context)
     apply_updates(profile, turn)
+    prefs.apply_signals(session, user.telegram_id, turn.preference_signals)
 
     if turn.asked_topic and turn.asked_topic not in asked_topics:
         session.add(AskedQuestion(user_id=user.telegram_id, topic=turn.asked_topic))
 
     session.add(Message(user_id=user.telegram_id, role="assistant", content=turn.reply))
     return turn.reply
+
+
+def _recent_match_context(session, user_id: int) -> str:
+    """Contexte du dernier profil proposé (pour interpréter les réactions, §7)."""
+    import datetime as _dt
+
+    from .db import Match, utcnow
+    cutoff = utcnow() - _dt.timedelta(days=7)
+    match = (session.query(Match)
+             .filter(((Match.user_m_id == user_id) | (Match.user_f_id == user_id)),
+                     Match.updated_at >= cutoff)
+             .order_by(Match.updated_at.desc()).first())
+    if match is None:
+        return ""
+    other_id = match.user_f_id if match.user_m_id == user_id else match.user_m_id
+    other = session.get(Profile, other_id)
+    if other is None:
+        return ""
+    response = match.response_m if match.user_m_id == user_id else match.response_f
+    labels = {"pending": "pas encore répondu", "accepted": "accepté", "refused": "refusé",
+              "postponed": "reporté", "info": "a demandé plus d'informations"}
+    return (f"\nCONTEXTE — DERNIER PROFIL PROPOSÉ À CE MEMBRE (réaction : {labels.get(response, response)})\n"
+            f"Profil anonyme : {other.gender}, {other.age} ans, {other.city or '?'} "
+            f"({other.country or '?'}), {other.profession or '?'} ; "
+            f"personnalité : {', '.join((other.personality_traits or [])[:4]) or '?'} ; "
+            f"intérêts : {', '.join((other.interests or [])[:4]) or '?'} ; "
+            f"pratique : {other.religious_practice or '?'}.\n"
+            f"Si le membre commente ce profil, analyse sa réaction en priorité "
+            f"(preference_signals) et recueille son ressenti.\n")
+
+
+def generate_profile_presentation(other: Profile) -> str | None:
+    """Présentation narrative et anonymisée d'un profil (charte §6) : humaine,
+    réaliste, suffisamment détaillée pour provoquer une réaction — pas une liste
+    de caractéristiques techniques. Renvoie None si l'IA est indisponible."""
+    if not ai_enabled():
+        return None
+    facts = json.dumps({
+        "sexe": other.gender, "age": other.age, "ville": other.city,
+        "pays": other.country, "profession": other.profession,
+        "etudes": other.education, "situation": other.marital_status,
+        "delai_mariage": other.marriage_timeline,
+        "souhaite_enfants": other.wants_children,
+        "pratique_religieuse": other.religious_practice,
+        "personnalite": (other.personality_traits or [])[:5],
+        "centres_interet": (other.interests or [])[:5],
+        "habitudes": (other.lifestyle_facts or [])[:4],
+    }, ensure_ascii=False)
+    try:
+        client = get_client()
+        response = client.messages.create(
+            model=config.CLAUDE_MODEL,
+            max_tokens=1024,
+            messages=[{"role": "user", "content":
+                "Rédige la présentation anonymisée d'un profil pour une plateforme de "
+                "rencontre musulmane sérieuse, à partir de ces informations factuelles :\n"
+                f"{facts}\n\n"
+                "Règles : en français, 3 à 5 phrases chaleureuses et humaines ; commence par "
+                "« Ce frère » ou « Cette sœur » selon le sexe ; raconte la personne (valeurs, "
+                "façon d'être, ce qui compte pour elle) plutôt que d'énumérer des critères ; "
+                "n'invente RIEN qui ne soit pas dans les informations fournies ; ne révèle ni "
+                "prénom ni élément identifiant ; n'exagère pas la compatibilité. "
+                "Réponds uniquement par la présentation, sans préambule."}],
+        )
+        text = next((b.text for b in response.content if b.type == "text"), "").strip()
+        return text or None
+    except Exception:
+        log.exception("Présentation narrative indisponible, repli sur la fiche standard")
+        return None
 
 
 def generate_community_text(kind: str, context: str = "") -> str:

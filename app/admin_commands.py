@@ -14,8 +14,8 @@ from telegram.constants import ParseMode
 from telegram.ext import CommandHandler, ContextTypes
 
 from . import ai, config
-from .db import (AskedQuestion, Match, Message, Profile, User, db_session,
-                 utcnow)
+from .db import (AskedQuestion, Match, Message, Preference, Profile, User,
+                 db_session, utcnow)
 
 log = logging.getLogger("admin")
 
@@ -115,6 +115,11 @@ async def cmd_fiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
         p = user.profile
         oui_non = {True: "oui", False: "non"}
+        prefs = (s.query(Preference).filter(Preference.user_id == uid)
+                 .order_by(Preference.confidence.desc()).limit(8).all())
+        prefs_txt = "\n".join(
+            f"  – [{pr.dimension}] {pr.key} : {pr.orientation} "
+            f"({pr.confidence}%, {pr.occurrences} obs.)" for pr in prefs) or "  – aucune pour le moment"
         await update.message.reply_text(
             f"📋 *{p.pseudo or user.display_name or '—'}* — `{uid}` "
             f"(@{user.username or '—'})\n"
@@ -131,7 +136,8 @@ async def cmd_fiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"• Personnalité : {', '.join(p.personality_traits or []) or '—'}\n"
             f"• Intérêts : {', '.join(p.interests or []) or '—'}\n"
             f"• Habitudes : {', '.join(p.lifestyle_facts or []) or '—'}\n"
-            f"• Notes du bot : {' · '.join(p.memory_notes or []) or '—'}\n\n"
+            f"• Notes du bot : {' · '.join(p.memory_notes or []) or '—'}\n"
+            f"• Préférences apprises (réactions) :\n{prefs_txt}\n\n"
             f"Inscrit le {user.created_at:%d/%m/%Y} — dernière activité "
             f"{user.last_active_at:%d/%m/%Y %H:%M}\n"
             f"Conversation : `/conv {uid}`",

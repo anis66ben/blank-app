@@ -257,6 +257,9 @@ async function showUser(id) {
     ["Habitudes de vie", (u.lifestyle_facts || []).join(", ")],
     ["Notes mémorisées par le bot", (u.memory_notes || []).join(" · ")],
     ["Sujets déjà abordés", (u.asked_topics || []).join(", ")],
+    ["Préférences apprises (réactions)", (u.preferences || []).map(p =>
+      `${p.key} — ${p.orientation} (${p.confidence}%, ${p.occurrences} obs.)`
+    ).join(" · ")],
   ]);
   $("#user-detail-panel").scrollIntoView({behavior: "smooth"});
 }

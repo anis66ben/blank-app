@@ -14,8 +14,8 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from . import config
-from .db import (AskedQuestion, Match, Message, Profile, User, db_session,
-                 utcnow)
+from .db import (AskedQuestion, Match, Message, Preference, Profile, User,
+                 db_session, utcnow)
 
 app = FastAPI(title="Admin — Plateforme de rencontre", docs_url="/api/docs")
 security = HTTPBasic(auto_error=False)
@@ -147,6 +147,9 @@ def user_detail(telegram_id: int) -> dict:
         p = user.profile
         topics = [q.topic for q in session.query(AskedQuestion)
                   .filter(AskedQuestion.user_id == telegram_id).all()]
+        prefs = (session.query(Preference)
+                 .filter(Preference.user_id == telegram_id)
+                 .order_by(Preference.confidence.desc()).all())
         row = _user_row(user, p)
         row.update({
             "marriage_timeline": p.marriage_timeline,
@@ -159,6 +162,12 @@ def user_detail(telegram_id: int) -> dict:
             "lifestyle_facts": p.lifestyle_facts or [],
             "memory_notes": p.memory_notes or [],
             "asked_topics": topics,
+            "preferences": [{
+                "dimension": pr.dimension, "key": pr.key,
+                "orientation": pr.orientation, "score": pr.score,
+                "occurrences": pr.occurrences, "confidence": pr.confidence,
+                "last_evidence": pr.last_evidence,
+            } for pr in prefs],
         })
         return row
 
