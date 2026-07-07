@@ -131,6 +131,28 @@ app/
 scripts/seed_demo.py   # données de démonstration
 ```
 
+## Déploiement sur un VPS (Debian/Ubuntu)
+
+```bash
+# Sur le serveur :
+apt-get update && apt-get install -y git
+git clone -b claude/muslim-matchmaking-telegram-0onyu1 https://github.com/anis66ben/blank-app.git /opt/rencontre
+bash /opt/rencontre/deploy/install.sh     # services systemd isolés (rencontre-*)
+nano /opt/rencontre/.env                  # renseigner les secrets
+systemctl restart rencontre-bot rencontre-webadmin
+
+# HTTPS pour l'accès smartphone (certificat automatique, domaine optionnel) :
+bash /opt/rencontre/deploy/setup-https.sh            # -> https://<ip-tirets>.sslip.io
+bash /opt/rencontre/deploy/setup-https.sh mondomaine.fr
+
+# Mises à jour ultérieures :
+bash /opt/rencontre/deploy/update.sh
+```
+
+Tout est isolé dans `/opt/rencontre` (utilisateur système dédié, venv propre,
+port choisi automatiquement parmi les ports libres) : aucune interférence avec
+d'autres applications présentes sur le serveur.
+
 ## Respect des données personnelles
 
 - L'accès aux conversations depuis le dashboard est réservé à la modération
