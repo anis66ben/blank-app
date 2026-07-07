@@ -22,6 +22,11 @@ if DATABASE_URL.startswith("sqlite:///") and not DATABASE_URL.startswith("sqlite
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 COMMUNITY_CHAT_ID = os.getenv("COMMUNITY_CHAT_ID", "")
 
+# IDs Telegram des administrateurs (séparés par des virgules) : accès aux
+# commandes /admin, /membres, /fiche, /matchs, /conv, /publier dans le bot.
+ADMIN_TELEGRAM_IDS = {int(x) for x in os.getenv("ADMIN_TELEGRAM_IDS", "")
+                      .replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()}
+
 MATCH_THRESHOLD = int(os.getenv("MATCH_THRESHOLD", "65"))
 MIN_COMPLETENESS_FOR_MATCHING = int(os.getenv("MIN_COMPLETENESS_FOR_MATCHING", "30"))
 

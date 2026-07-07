@@ -44,6 +44,24 @@ conversations naturelles, sans aucune autre modification.
 - Chaque paire reçoit un **score 0-100** avec décomposition consultable dans le
   dashboard.
 
+### 📱 Administration par smartphone (`app/admin_commands.py`)
+Gérez toute la plateforme **depuis Telegram** (donc depuis votre téléphone),
+sans ouvrir le dashboard web :
+1. Envoyez `/monid` au bot pour obtenir votre identifiant Telegram ;
+2. Ajoutez-le dans `.env` : `ADMIN_TELEGRAM_IDS=123456789` ;
+3. Redémarrez le bot. Vous avez alors accès à :
+
+| Commande | Effet |
+|---|---|
+| `/admin` | Statistiques générales (membres, matchs, taux d'acceptation…) |
+| `/membres [recherche]` | Liste ou recherche de membres |
+| `/fiche <id>` | Fiche complète d'un membre |
+| `/matchs` | Derniers matchs avec scores et statuts |
+| `/conv <id>` | Derniers échanges bot ↔ membre (modération) |
+| `/publier question\|quiz\|regles\|stats` | Publier immédiatement dans le groupe |
+
+Les commandes sont invisibles et inertes pour les non-administrateurs.
+
 ### 🖥️ Tableau de bord administrateur local (`app/webadmin.py`)
 Backend **FastAPI** qui tourne en local et sert à la fois une **API REST**
 (`/api/…`, documentation interactive sur `/api/docs`) et une **interface web**

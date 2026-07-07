@@ -16,7 +16,7 @@ from telegram.error import TelegramError
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
                           ContextTypes, MessageHandler, filters)
 
-from . import ai, config, matching
+from . import admin_commands, ai, config, matching
 from .db import (CommunityPost, Match, Message, Profile, User, db_session,
                  get_or_create_user, utcnow)
 from .profile_schema import FIELD_LABELS
@@ -402,6 +402,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("reprendre", cmd_reprendre))
     app.add_handler(CallbackQueryHandler(on_match_button, pattern=r"^match:"))
+    admin_commands.register(app)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
     jq = app.job_queue
