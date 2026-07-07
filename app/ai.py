@@ -11,12 +11,17 @@ import logging
 
 import anthropic
 
-from . import config
+from . import config, scripted
 from .db import AskedQuestion, Message, Profile, User
 from .profile_schema import (BotTurn, CATEGORY_LABELS, FIELD_LABELS,
                              missing_fields)
 
 log = logging.getLogger(__name__)
+
+
+def ai_enabled() -> bool:
+    """L'IA est active si une clé API est configurée ; sinon, mode guidé."""
+    return bool(config.ANTHROPIC_API_KEY)
 
 _client: anthropic.Anthropic | None = None
 
@@ -144,7 +149,12 @@ def apply_updates(profile: Profile, turn: BotTurn) -> None:
 
 def handle_user_message(session, user: User, text: str) -> str:
     """Tour complet : enregistre le message, appelle l'IA, met à jour le profil,
-    enregistre la réponse. Renvoie le texte à envoyer."""
+    enregistre la réponse. Renvoie le texte à envoyer.
+
+    Sans clé API (ANTHROPIC_API_KEY vide), bascule sur le questionnaire guidé."""
+    if not ai_enabled():
+        return scripted.handle_user_message(session, user, text)
+
     profile = user.profile
     session.add(Message(user_id=user.telegram_id, role="user", content=text))
     session.flush()
@@ -172,7 +182,10 @@ def handle_user_message(session, user: User, text: str) -> str:
 
 
 def generate_community_text(kind: str, context: str = "") -> str:
-    """Génère un contenu d'animation communautaire (question, quiz, rappel...)."""
+    """Génère un contenu d'animation communautaire (question, quiz, rappel...).
+    Sans clé API — ou si l'appel échoue — utilise la banque de contenus statiques."""
+    if not ai_enabled():
+        return scripted.static_community_text(kind)
     prompts = {
         "question": "Rédige une unique question de réflexion bienveillante pour un groupe Telegram "
                     "de musulmans célibataires cherchant le mariage (thèmes : vie de couple, valeurs, "

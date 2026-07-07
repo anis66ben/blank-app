@@ -26,6 +26,15 @@ service externe requis).
   profil de la semaine, rappel des règles.
 - Commandes : `/start`, `/profil`, `/aide`, `/pause`, `/reprendre`.
 
+### 🪶 Mode sans API (démarrage à coût zéro)
+Si `ANTHROPIC_API_KEY` est **vide**, le bot bascule automatiquement en
+**questionnaire guidé** (`app/scripted.py`) : questions prédéfinies posées une
+à la fois, analyse des réponses par règles (dates, âges, oui/non, listes...),
+contenus communautaires issus d'une banque statique. Le profil, l'indice de
+connaissance, le matching et le dashboard fonctionnent à l'identique.
+Ajoutez la clé plus tard dans `.env` et redémarrez : le bot passe en
+conversations naturelles, sans aucune autre modification.
+
 ### 💘 Moteur de matching (`app/matching.py`)
 - **Obligatoires** (éliminatoires) : sexes opposés, majorité, tranche d'âge,
   complétude minimale des deux profils.

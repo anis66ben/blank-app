@@ -47,6 +47,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     with db_session() as session:
         user = get_or_create_user(session, tg_user.id, tg_user.username, tg_user.full_name)
         session.add(Message(user_id=user.telegram_id, role="assistant", content=WELCOME))
+        # Le message d'accueil demande le prénom : en mode guidé (sans API),
+        # on le mémorise pour que la première réponse soit comprise comme tel.
+        if not ai.ai_enabled():
+            from .db import AskedQuestion
+            already = (session.query(AskedQuestion)
+                       .filter(AskedQuestion.user_id == user.telegram_id,
+                               AskedQuestion.topic == "pseudo").count())
+            if not already:
+                session.add(AskedQuestion(user_id=user.telegram_id, topic="pseudo"))
     await update.message.reply_text(WELCOME)
 
 
