@@ -33,6 +33,13 @@ echo "== 5/6 Configuration =="
 if [ ! -f "$APP_DIR/.env" ]; then
     cp "$APP_DIR/.env.example" "$APP_DIR/.env"
     echo "WEBADMIN_HOST=0.0.0.0" >> "$APP_DIR/.env"
+    # Choisit un port libre (8090-8099) pour ne pas gêner les autres services
+    PORT=8090
+    while ss -tln 2>/dev/null | grep -q ":$PORT " && [ "$PORT" -lt 8100 ]; do
+        PORT=$((PORT + 1))
+    done
+    echo "WEBADMIN_PORT=$PORT" >> "$APP_DIR/.env"
+    echo ">>> Interface web configurée sur le port $PORT (libre sur ce serveur)."
     echo ""
     echo ">>> IMPORTANT : éditez $APP_DIR/.env (nano $APP_DIR/.env) pour renseigner"
     echo ">>> TELEGRAM_BOT_TOKEN, ADMIN_PASSWORD et ADMIN_TELEGRAM_IDS, puis relancez :"
@@ -49,10 +56,12 @@ systemctl daemon-reload
 systemctl enable --now rencontre-bot rencontre-webadmin
 
 echo ""
+PORT_FINAL=$(grep -oP '^WEBADMIN_PORT=\K\d+' "$APP_DIR/.env" 2>/dev/null || echo 8000)
 echo "=================================================================="
-echo " Installation terminée."
+echo " Installation terminée. Tout est isolé dans $APP_DIR"
+echo " (utilisateur dédié '$APP_USER', venv propre, services 'rencontre-*')."
 echo "  - Bot        : systemctl status rencontre-bot"
-echo "  - Interface  : http://$(hostname -I | awk '{print $1}'):8000"
+echo "  - Interface  : http://$(hostname -I | awk '{print $1}'):$PORT_FINAL"
 echo "  - Journaux   : journalctl -u rencontre-bot -f"
 echo "  - Mise à jour: sudo bash $APP_DIR/deploy/update.sh"
 echo "=================================================================="
