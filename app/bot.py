@@ -452,8 +452,28 @@ def build_application() -> Application:
     return app
 
 
+def _preload_model() -> None:
+    """Précharge le modèle MLX en arrière-plan pour que le premier membre ne
+    subisse pas le temps de chargement (plusieurs secondes)."""
+    from . import llm
+    if llm.provider() != "mlx":
+        return
+    import threading
+
+    from . import mlx_backend
+
+    def _load():
+        try:
+            mlx_backend.ensure_loaded()
+        except Exception:
+            log.warning("Préchargement MLX impossible (le modèle se chargera au 1er message)")
+    threading.Thread(target=_load, daemon=True).start()
+    log.info("Préchargement du modèle MLX en arrière-plan…")
+
+
 def main() -> None:
     app = build_application()
+    _preload_model()
     log.info("Bot démarré — en attente de messages…")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 

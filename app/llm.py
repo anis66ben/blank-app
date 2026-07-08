@@ -48,7 +48,7 @@ def _ollama_reachable() -> bool:
 
 def provider() -> str:
     """Fournisseur actif, selon la config puis l'auto-détection."""
-    if config.LLM_PROVIDER in ("claude", "ollama", "none"):
+    if config.LLM_PROVIDER in ("claude", "ollama", "mlx", "none"):
         return config.LLM_PROVIDER
     # auto
     if config.ANTHROPIC_API_KEY:
@@ -59,16 +59,16 @@ def provider() -> str:
 
 
 def enabled() -> bool:
-    return provider() in ("claude", "ollama")
+    return provider() in ("claude", "ollama", "mlx")
 
 
 def rag_enabled() -> bool:
-    """Le RAG nécessite des embeddings : disponible avec Ollama."""
+    """Le RAG nécessite des embeddings : disponible avec Ollama uniquement.
+    (MLX n'expose pas d'embeddings ici ; le bot utilise alors une fenêtre
+    d'historique classique + la mémoire structurée des préférences.)"""
     if config.RAG_ENABLED == "false":
         return False
-    if config.RAG_ENABLED == "true":
-        return provider() == "ollama"
-    return provider() == "ollama"      # auto
+    return provider() == "ollama"
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +170,28 @@ def chat_structured(system: str, messages: list[dict], model_cls: Type[T]) -> T:
             log.warning("Sortie structurée Ollama invalide, repli texte simple : %.200s", raw)
             return _text_fallback(model_cls, raw or _plain_reply(system, messages))
 
+    if prov == "mlx":
+        from . import mlx_backend
+        schema = model_cls.model_json_schema()
+        json_system = (system + "\n\nRÉPONDS UNIQUEMENT par un objet JSON valide, sans texte "
+                       "autour ni balise de code, strictement conforme à ce schéma :\n"
+                       + json.dumps(schema, ensure_ascii=False))
+        raw = mlx_backend.generate_text(json_system, messages)
+        data = _extract_json(raw)
+        if data is not None:
+            try:
+                return model_cls.model_validate(data)
+            except Exception:
+                log.warning("JSON MLX non conforme au schéma, repli texte")
+        else:
+            log.warning("Aucun JSON exploitable dans la sortie MLX, repli texte")
+        # repli : une réponse conversationnelle simple, sans extraction structurée
+        try:
+            plain = mlx_backend.generate_text(system, messages)
+        except Exception:
+            plain = raw
+        return _text_fallback(model_cls, plain or raw)
+
     raise RuntimeError("Aucun fournisseur IA actif")
 
 
@@ -183,6 +205,9 @@ def chat_text(prompt: str) -> str:
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
     if prov == "ollama":
         return _ollama_chat("", [{"role": "user", "content": prompt}], fmt=None)
+    if prov == "mlx":
+        from . import mlx_backend
+        return mlx_backend.generate_text("", [{"role": "user", "content": prompt}])
     raise RuntimeError("Aucun fournisseur IA actif")
 
 
@@ -193,6 +218,37 @@ def embed(texts: list[str]) -> list[list[float]]:
     data = _ollama_post("/api/embed",
                         {"model": config.OLLAMA_EMBED_MODEL, "input": texts})
     return data.get("embeddings", [])
+
+
+def _extract_json(text: str) -> dict | None:
+    """Extrait le premier objet JSON d'une sortie de modèle, même entouré de
+    texte ou de balises ```json (fréquent avec un petit modèle local)."""
+    if not text:
+        return None
+    text = _strip_think(text)
+    # retire les clôtures de code éventuelles
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    candidate = fence.group(1) if fence else None
+    if candidate is None:
+        # premier { … } équilibré
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:i + 1]
+                    break
+    if not candidate:
+        return None
+    try:
+        return json.loads(candidate)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------

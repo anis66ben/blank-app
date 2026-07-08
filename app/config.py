@@ -10,15 +10,20 @@ load_dotenv(BASE_DIR / ".env")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # --- Choix du moteur IA -----------------------------------------------------
-# LLM_PROVIDER : "claude", "ollama", "none" ou "" (auto).
-#   auto = ollama si OLLAMA_BASE_URL joignable, sinon claude si clé, sinon none.
+# LLM_PROVIDER : "mlx" (local Apple Silicon), "ollama", "claude", "none" ou "" (auto).
+#   auto = claude si clé, sinon ollama si joignable, sinon none.
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()
 
 # Claude (API payante, optionnelle)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-4-8")
 
-# Ollama local (Qwen3 8B, gratuit et privé)
+# MLX local (Qwen3 4B 4-bit, Apple Silicon — gratuit et privé, sans Ollama)
+MLX_MODEL = os.getenv("MLX_MODEL", "mlx-community/Qwen3-4B-4bit")
+MLX_MAX_TOKENS = int(os.getenv("MLX_MAX_TOKENS", "400"))
+MLX_THINK = os.getenv("MLX_THINK", "false").strip().lower() == "true"
+
+# Ollama local (alternative à MLX)
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")

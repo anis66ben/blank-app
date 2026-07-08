@@ -1,0 +1,4 @@
+# Dépendances pour le moteur LLM local MLX (macOS Apple Silicon uniquement).
+# À installer EN PLUS de requirements.txt, sur le Mac qui fait tourner le bot :
+#   pip install -r requirements-mlx.txt
+mlx-lm>=0.31.3

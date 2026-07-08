@@ -27,37 +27,54 @@ service externe requis).
 - Commandes : `/start`, `/profil`, `/aide`, `/pause`, `/reprendre`.
 
 ### 🧠 Moteur IA : Claude, Qwen3 local, ou mode guidé
-Le bot fonctionne avec trois moteurs interchangeables (`LLM_PROVIDER` dans `.env`) :
+Le bot fonctionne avec quatre moteurs interchangeables (`LLM_PROVIDER` dans `.env`) :
 
 | `LLM_PROVIDER` | Moteur | Coût / confidentialité |
 |---|---|---|
-| `ollama` | **Qwen3 8B en local** via [Ollama](https://ollama.com) | Gratuit, 100 % privé (rien ne sort de la machine) |
+| `mlx` | **Qwen3 4B (4-bit) en local via MLX** — Apple Silicon | Gratuit, 100 % privé, optimisé M1/M2/M3 |
+| `ollama` | Qwen3 en local via [Ollama](https://ollama.com) | Gratuit, 100 % privé |
 | `claude` | API Anthropic (Claude) | Payant, qualité maximale |
 | `none` | Questionnaire guidé (`app/scripted.py`) | Gratuit, sans IA (questions prédéfinies) |
 | *(vide)* | Auto : Claude si clé, sinon Ollama si joignable, sinon guidé | — |
 
-La couche `app/llm.py` unifie les trois : conversation structurée, texte libre,
-embeddings. Le profil, l'indice de connaissance, le matching et le dashboard
-fonctionnent à l'identique quel que soit le moteur.
+La couche `app/llm.py` unifie les moteurs : conversation structurée, texte
+libre, embeddings. Le profil, l'indice de connaissance, le matching et le
+dashboard fonctionnent à l'identique quel que soit le moteur.
 
-**Installer Qwen3 en local :**
+**Option recommandée sur Mac Apple Silicon — MLX (le plus rapide, sans Ollama) :**
 ```bash
-# 1. Installer Ollama : https://ollama.com/download
-ollama pull qwen3:8b            # le modèle de conversation
-ollama pull nomic-embed-text    # le modèle d'embeddings (pour le RAG)
-# 2. Dans .env : LLM_PROVIDER=ollama   (déjà par défaut dans .env.example)
+pip install -r requirements-mlx.txt     # installe mlx-lm (macOS Apple Silicon)
+# Dans .env : LLM_PROVIDER=mlx  (déjà par défaut dans .env.example)
 ```
-Le bot doit tourner sur la **même machine qu'Ollama** (ou pouvoir joindre
-`OLLAMA_BASE_URL`).
+Le modèle `mlx-community/Qwen3-4B-4bit` (~2,3 Go) se télécharge automatiquement
+au premier lancement (cache Hugging Face `~/.cache/huggingface/`), puis tourne
+directement dans le processus Python — aucun service externe, aucune donnée qui
+sort de la machine. Le raisonnement Qwen3 est désactivé (`enable_thinking=False`)
+pour des réponses rapides. Le modèle est préchargé au démarrage du bot.
+
+**Alternative — Ollama :**
+```bash
+# Installer Ollama : https://ollama.com/download
+ollama pull qwen3:4b            # conversation
+ollama pull nomic-embed-text    # embeddings (RAG)
+# Dans .env : LLM_PROVIDER=ollama
+```
+Avec MLX comme avec Ollama, le bot doit tourner sur la machine qui héberge le
+modèle.
 
 ### 🗂️ RAG — mémoire vectorielle (fenêtre de contexte déportée)
-Avec Ollama, le RAG (`app/rag.py`) est actif automatiquement. Au lieu d'entasser
-tout l'historique dans le prompt, chaque souvenir (fait, réaction, préférence)
-est stocké sous forme de vecteur dans la table `memory_chunks` ; à chaque
-message, seuls les `RAG_TOP_K` souvenirs les plus pertinents sont réinjectés.
-Le contexte « vit » dans la base, pas dans le prompt : les conversations
-restent légères et rapides même après des mois d'échanges. Consultable pour
-chaque membre dans le dashboard et via `/fiche` sur Telegram.
+Avec **Ollama**, le RAG (`app/rag.py`) est actif automatiquement : au lieu
+d'entasser tout l'historique dans le prompt, chaque souvenir (fait, réaction,
+préférence) est stocké sous forme de vecteur dans la table `memory_chunks` ; à
+chaque message, seuls les `RAG_TOP_K` souvenirs les plus pertinents sont
+réinjectés. Le contexte « vit » dans la base, pas dans le prompt.
+
+Avec **MLX**, le RAG est désactivé (mlx-lm n'expose pas d'embeddings ici) : le
+bot utilise une fenêtre d'historique classique **plus** la mémoire structurée
+des préférences (`app/preferences.py`), qui ne nécessite pas d'embeddings et
+alimente le matching (charte §11). La qualité de compréhension reste donc
+préservée. Les préférences apprises sont consultables dans le dashboard et via
+`/fiche` sur Telegram.
 
 ### 💘 Moteur de matching (`app/matching.py`)
 - **Obligatoires** (éliminatoires) : sexes opposés, majorité, tranche d'âge,
