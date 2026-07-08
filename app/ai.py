@@ -12,7 +12,7 @@ import logging
 from . import config, convlog, llm, rag, scripted
 from .db import AskedQuestion, Message, Profile, User
 from .persona import PERSONA_PROMPT
-from .profile_schema import (BotTurn, CATEGORY_LABELS, FIELD_LABELS,
+from .profile_schema import (BotTurn, CATEGORY_LABELS, Extraction, FIELD_LABELS,
                              missing_fields)
 
 log = logging.getLogger(__name__)
@@ -86,13 +86,86 @@ FORMAT DE SORTIE (JSON structuré — indispensable au fonctionnement de l'appli
 Date du jour : {dt.date.today().isoformat()}."""
 
 
+def build_reply_prompt(profile: Profile, asked_topics: list[str],
+                       preferences_summary: str = "", extra_context: str = "") -> str:
+    """Prompt pour la RÉPONSE conversationnelle seule (texte, sans JSON).
+    Utilisé avec les petits modèles locaux : ils conversent bien mieux sans la
+    charge du format structuré."""
+    missing = missing_fields(profile)
+    next_targets = [FIELD_LABELS.get(f, f) for f in missing[:3]]
+    snapshot = json.dumps(profile_snapshot(profile), ensure_ascii=False)
+    asked = ", ".join(asked_topics) if asked_topics else "aucune"
+    return f"""{PERSONA_PROMPT}
+
+---
+CE QUE TU SAIS DÉJÀ SUR CETTE PERSONNE (ne le redemande pas) :
+{snapshot}
+Sujets déjà abordés : {asked}.
+Préférences déjà comprises : {preferences_summary or "aucune"}.
+Pistes à explorer en douceur : {", ".join(next_targets) if next_targets else "ses valeurs, sa vision de la vie, ses aspirations"}.
+{extra_context}
+CONSIGNE POUR CE MESSAGE :
+Réponds maintenant, en français, au DERNIER message de la personne. Rebondis vraiment sur ce qu'elle vient de dire (ne réponds pas à côté). 2 à 4 phrases, chaleureux et naturel. Termine par UNE seule question ouverte qui l'aide à se raconter (une histoire, un souvenir, ce qui compte pour elle) — jamais une liste de questions. Ne répète JAMAIS une formule que tu as déjà employée dans la conversation. Écris uniquement ton message, sans guillemets ni préambule."""
+
+
+EXTRACT_PROMPT = """Tu es un extracteur d'informations pour un profil de rencontre. À partir UNIQUEMENT du message du membre ci-dessous, renseigne les champs qu'il a EXPLICITEMENT écrits DANS CE MESSAGE.
+
+RÈGLES ABSOLUES :
+- N'invente RIEN. Ne recopie RIEN qui ne soit pas dans ce message précis.
+- Si le message est une salutation ou une banalité (« Salam », « oui », « ok », « merci », « ça va »), renvoie TOUT vide.
+- `updates` = seulement les faits nouveaux dits maintenant (prénom, âge, ville, etc.).
+- `preference_signals` = seulement si le membre exprime un goût/une valeur/une réserve.
+
+Exemples :
+Message : « Salam »  →  {"updates": {}, "asked_topic": null, "memory_notes": [], "preference_signals": []}
+Message : « oui dis moi »  →  {"updates": {}, "asked_topic": null, "memory_notes": [], "preference_signals": []}
+Message : « Je m'appelle Sami, j'ai 28 ans et je vis à Lyon »  →  {"updates": {"pseudo": "Sami", "age_estimate": 28, "city": "Lyon"}, "asked_topic": null, "memory_notes": [], "preference_signals": []}
+Message : « J'aimerais une femme proche de sa famille »  →  {"updates": {}, "asked_topic": null, "memory_notes": ["Attache de l'importance à la proximité familiale"], "preference_signals": [{"dimension": "valeurs", "cle": "famille", "orientation": "favorable", "score": 7, "indice": "proche de sa famille"}]}"""
+
+
+def _extract(last_user_message: str) -> Extraction:
+    """Extraction bornée au seul dernier message (empêche la recopie du profil)."""
+    if not last_user_message.strip():
+        return Extraction()
+    try:
+        return llm.chat_structured(EXTRACT_PROMPT,
+                                   [{"role": "user", "content": last_user_message}],
+                                   Extraction)
+    except Exception:
+        log.warning("Extraction échouée, ignorée", exc_info=False)
+        return Extraction()
+
+
 def converse(profile: Profile, history: list[dict], asked_topics: list[str],
              preferences_summary: str = "", match_context: str = "",
              rag_context: str = "", meta: dict | None = None) -> BotTurn:
-    """Appelle le moteur IA actif et renvoie la réponse structurée."""
-    system = build_system_prompt(profile, asked_topics, preferences_summary,
-                                 match_context + rag_context)
-    return llm.chat_structured(system, history, BotTurn, meta=meta)
+    """Appelle le moteur IA actif et renvoie la réponse structurée.
+
+    - Claude (modèle puissant) : un seul appel structuré (réponse + extraction).
+    - Petit modèle local (mlx/ollama) : DEUX appels séparés — une réponse
+      conversationnelle en texte simple (rapide, vivante), puis une extraction
+      bornée au dernier message (pas de recopie du profil, pas d'hallucination)."""
+    if meta is None:
+        meta = {}
+    prov = llm.provider()
+    extra = match_context + rag_context
+
+    if prov == "claude":
+        system = build_system_prompt(profile, asked_topics, preferences_summary, extra)
+        return llm.chat_structured(system, history, BotTurn, meta=meta)
+
+    # Petit modèle local : réponse d'abord, extraction ensuite.
+    meta["provider"] = prov
+    meta["fallback"] = False
+    reply_system = build_reply_prompt(profile, asked_topics, preferences_summary, extra)
+    reply = (llm.chat(reply_system, history, max_tokens=256) or "").strip()
+    meta["raw"] = reply
+    last_user = next((m["content"] for m in reversed(history) if m["role"] == "user"), "")
+    ext = _extract(last_user)
+    return BotTurn(reply=reply or "Je t'écoute, raconte-moi un peu plus.",
+                   updates=ext.updates, asked_topic=ext.asked_topic,
+                   memory_notes=ext.memory_notes,
+                   preference_signals=ext.preference_signals)
 
 
 def apply_updates(profile: Profile, turn: BotTurn) -> None:

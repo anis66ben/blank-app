@@ -155,6 +155,15 @@ class PreferenceSignal(BaseModel):
     indice: Optional[str] = Field(None, description="Citation courte du message qui fonde ce signal")
 
 
+class Extraction(BaseModel):
+    """Extraction seule (sans réponse conversationnelle) — 2e appel pour les
+    petits modèles locaux : uniquement les faits explicitement dits."""
+    updates: ProfileUpdates = Field(default_factory=ProfileUpdates)
+    asked_topic: Optional[str] = None
+    memory_notes: List[str] = Field(default_factory=list)
+    preference_signals: List[PreferenceSignal] = Field(default_factory=list)
+
+
 class BotTurn(BaseModel):
     """Réponse complète du bot pour un tour de conversation."""
     reply: str = Field(description="Message à envoyer à l'utilisateur, en français, chaleureux et naturel")

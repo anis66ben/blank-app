@@ -93,16 +93,20 @@ def _inject_no_think(messages: list[dict]) -> list[dict]:
     return msgs
 
 
-def _ollama_chat(system: str, messages: list[dict], fmt: dict | None) -> str:
+def _ollama_chat(system: str, messages: list[dict], fmt: dict | None,
+                 num_predict: int | None = None) -> str:
     msgs = ([{"role": "system", "content": system}] if system else []) + messages
     if not config.OLLAMA_THINK:
         msgs = _inject_no_think(msgs)
+    options = {"temperature": 0.7, "num_ctx": config.OLLAMA_NUM_CTX}
+    if num_predict:
+        options["num_predict"] = num_predict
     body = {
         "model": config.OLLAMA_MODEL,
         "messages": msgs,
         "stream": False,
         "keep_alive": config.OLLAMA_KEEP_ALIVE,   # garde le modèle en mémoire
-        "options": {"temperature": 0.7, "num_ctx": config.OLLAMA_NUM_CTX},
+        "options": options,
     }
     if not config.OLLAMA_THINK:
         body["think"] = False                     # désactive le raisonnement Qwen3
@@ -212,18 +216,30 @@ def chat_structured(system: str, messages: list[dict], model_cls: Type[T],
 
 def chat_text(prompt: str) -> str:
     """Génération de texte libre (présentation de profil, contenu communautaire)."""
+    return chat("", [{"role": "user", "content": prompt}], max_tokens=1024)
+
+
+def chat(system: str, messages: list[dict], max_tokens: int | None = None) -> str:
+    """Réponse conversationnelle en texte simple (sans schéma JSON).
+    Utilisé pour la réponse au membre avec les petits modèles locaux."""
     prov = provider()
     if prov == "claude":
         resp = _claude().messages.create(
-            model=config.CLAUDE_MODEL, max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}])
+            model=config.CLAUDE_MODEL, max_tokens=max_tokens or 1024,
+            system=[{"type": "text", "text": system}] if system else NOT_GIVEN(),
+            messages=messages)
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
     if prov == "ollama":
-        return _ollama_chat("", [{"role": "user", "content": prompt}], fmt=None)
+        return _ollama_chat(system, messages, fmt=None, num_predict=max_tokens)
     if prov == "mlx":
         from . import mlx_backend
-        return mlx_backend.generate_text("", [{"role": "user", "content": prompt}])
+        return mlx_backend.generate_text(system, messages, max_tokens=max_tokens)
     raise RuntimeError("Aucun fournisseur IA actif")
+
+
+def NOT_GIVEN():
+    import anthropic
+    return anthropic.NOT_GIVEN
 
 
 def embed(texts: list[str]) -> list[list[float]]:
