@@ -23,6 +23,10 @@ from .profile_schema import FIELD_LABELS
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
+# Masque les logs de polling Telegram (une ligne HTTP toutes les quelques
+# secondes), pour ne garder que l'essentiel : démarrage, générations, erreurs.
+for _noisy in ("httpx", "httpcore", "telegram.ext.Updater", "telegram.request"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 log = logging.getLogger("bot")
 
 WELCOME = (
