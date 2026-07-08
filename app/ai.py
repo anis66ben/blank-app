@@ -11,7 +11,7 @@ import logging
 
 from . import config, convlog, llm, rag, scripted
 from .db import AskedQuestion, Message, Profile, User
-from .persona import PERSONA_PROMPT
+from .persona import PERSONA_BRIEF, PERSONA_PROMPT
 from .profile_schema import (BotTurn, CATEGORY_LABELS, Extraction, FIELD_LABELS,
                              missing_fields)
 
@@ -95,7 +95,7 @@ def build_reply_prompt(profile: Profile, asked_topics: list[str],
     next_targets = [FIELD_LABELS.get(f, f) for f in missing[:3]]
     snapshot = json.dumps(profile_snapshot(profile), ensure_ascii=False)
     asked = ", ".join(asked_topics) if asked_topics else "aucune"
-    return f"""{PERSONA_PROMPT}
+    return f"""{PERSONA_BRIEF}
 
 ---
 CE QUE TU SAIS DÉJÀ SUR CETTE PERSONNE (ne le redemande pas) :
@@ -104,13 +104,14 @@ Sujets déjà abordés : {asked}.
 Préférences déjà comprises : {preferences_summary or "aucune"}.
 Pistes à explorer en douceur : {", ".join(next_targets) if next_targets else "ses valeurs, sa vision de la vie, ses aspirations"}.
 {extra_context}
-CONSIGNE POUR CE MESSAGE :
-Les messages précédents de votre conversation te sont fournis (historique). APPUIE-TOI dessus :
-- assure une vraie continuité : rebondis sur ce que la personne vient de dire ET sur ce qu'elle t'a confié plus tôt ;
-- fais référence à ce qu'elle t'a déjà raconté quand c'est pertinent (« tu m'avais dit que… », « tu m'as parlé de… ») ;
-- ne repose JAMAIS une question déjà posée, ne répète JAMAIS une formule déjà employée ;
-- fais progresser la découverte vers un aspect encore inexploré.
-Réponds maintenant, en français, au DERNIER message : 2 à 4 phrases, chaleureux et naturel, en terminant par UNE seule question ouverte qui aide la personne à se raconter (une histoire, un souvenir, ce qui compte pour elle). Écris uniquement ton message, sans guillemets ni préambule."""
+RÈGLES POUR TA RÉPONSE — LES PLUS IMPORTANTES, À SUIVRE ABSOLUMENT :
+1. RESTE SUR SON SUJET. Réponds VRAIMENT à ce que la personne vient d'écrire. Si elle pose une question, réponds-y d'abord. Si elle raconte quelque chose, réagis précisément à CE qu'elle a dit — n'enchaîne pas sur un tout autre thème.
+2. ADAPTE-TOI À SON REGISTRE. Si elle dit juste « salam », « ça va », « ok », reste simple, léger et bref ; NE lance PAS de grande question philosophique. Tu n'approfondis (valeurs, vision, histoire) que lorsqu'elle s'ouvre d'elle-même.
+3. UNE seule question, courte et DIRECTEMENT CONNECTÉE à ce qu'elle vient de dire — le prolongement naturel de son propos, jamais une question générale plaquée ni un exemple recopié de ce prompt.
+4. Appuie-toi sur l'historique : ne repose jamais une question déjà posée, et fais référence à ce qu'elle t'a confié quand c'est pertinent (« tu m'avais dit que… »).
+5. Sois bref et humain : 1 à 3 phrases, chaleureux, naturel. Pas de préambule, pas de guillemets.
+
+Réponds maintenant, en français, au DERNIER message de la personne, en respectant ces 5 règles. Écris uniquement ton message."""
 
 
 EXTRACT_PROMPT = """Tu es un extracteur d'informations pour un profil de rencontre. À partir UNIQUEMENT du message du membre ci-dessous, renseigne les champs qu'il a EXPLICITEMENT écrits DANS CE MESSAGE.
