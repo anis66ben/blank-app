@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import secrets
 from pathlib import Path
+from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -22,7 +23,7 @@ security = HTTPBasic(auto_error=False)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def require_admin(credentials: HTTPBasicCredentials | None = Depends(security)) -> None:
+def require_admin(credentials: Optional[HTTPBasicCredentials] = Depends(security)) -> None:
     """Authentification HTTP Basic : n'importe quel identifiant, mot de passe
     = ADMIN_PASSWORD. Si ADMIN_PASSWORD est vide, accès libre (développement)."""
     if not config.ADMIN_PASSWORD:
