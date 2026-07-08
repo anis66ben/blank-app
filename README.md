@@ -43,9 +43,13 @@ dashboard fonctionnent à l'identique quel que soit le moteur.
 
 **Option recommandée sur Mac Apple Silicon — MLX (le plus rapide, sans Ollama) :**
 ```bash
-pip install -r requirements-mlx.txt     # installe mlx-lm (macOS Apple Silicon)
+pip install -r requirements-mlx.txt         # installe mlx-lm
+pip install "transformers>=4.51,<5.0"       # version compatible (voir note ci-dessous)
 # Dans .env : LLM_PROVIDER=mlx  (déjà par défaut dans .env.example)
 ```
+> ℹ️ `mlx-lm 0.31.3` déclare `transformers>=5.0` mais plante à l'import avec la
+> 5.0 (bug amont). On force donc une `transformers` 4.5x qui fonctionne et
+> supporte Qwen3. L'avertissement pip « dependency resolver… » est sans effet.
 Le modèle `mlx-community/Qwen3-4B-4bit` (~2,3 Go) se télécharge automatiquement
 au premier lancement (cache Hugging Face `~/.cache/huggingface/`), puis tourne
 directement dans le processus Python — aucun service externe, aucune donnée qui
