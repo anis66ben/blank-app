@@ -86,12 +86,20 @@ préférence) est stocké sous forme de vecteur dans la table `memory_chunks` ; 
 chaque message, seuls les `RAG_TOP_K` souvenirs les plus pertinents sont
 réinjectés. Le contexte « vit » dans la base, pas dans le prompt.
 
-Avec **MLX**, le RAG est désactivé (mlx-lm n'expose pas d'embeddings ici) : le
-bot utilise une fenêtre d'historique classique **plus** la mémoire structurée
-des préférences (`app/preferences.py`), qui ne nécessite pas d'embeddings et
-alimente le matching (charte §11). La qualité de compréhension reste donc
-préservée. Les préférences apprises sont consultables dans le dashboard et via
-`/fiche` sur Telegram.
+Avec **MLX**, le RAG est actif en deux modes (choisis automatiquement) :
+- **Sémantique** si vous installez le petit modèle d'embeddings
+  (`pip install -r requirements-rag.txt`) : similarité vectorielle, comprend les
+  reformulations. ⚠️ embarque PyTorch (~1-2 Go) — sur un Mac 8 Go où tourne déjà
+  le LLM, ça peut être juste.
+- **Lexical** sinon (par défaut, zéro dépendance) : recouvrement de mots-clés
+  avec racinisation française légère (famille/familial se rejoignent). Fonctionne
+  tout de suite, léger, et déporte réellement la mémoire hors du prompt.
+
+Dans les deux cas, la mémoire du membre (faits, réactions, préférences, échanges
+marquants) vit dans la table `memory_chunks`, **pas dans le prompt** : à chaque
+message, seuls les souvenirs pertinents sont récupérés et réinjectés. Le bot
+garde donc le fil de toute la relation sans alourdir la fenêtre de contexte.
+Réglages : `RAG_ENABLED`, `RAG_TOP_K`, `EMBED_MODEL` dans `.env`.
 
 ### 💘 Moteur de matching (`app/matching.py`)
 - **Obligatoires** (éliminatoires) : sexes opposés, majorité, tranche d'âge,

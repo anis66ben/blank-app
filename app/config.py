@@ -34,9 +34,13 @@ OLLAMA_THINK = os.getenv("OLLAMA_THINK", "false").strip().lower() == "true"
 # Maintient le modèle chargé en mémoire (évite le rechargement à chaque message).
 OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
 
-# RAG (mémoire vectorielle : « fenêtre de contexte déportée »)
+# RAG (mémoire déportée hors du prompt). auto/true = actif pour mlx/ollama.
 RAG_ENABLED = os.getenv("RAG_ENABLED", "auto").strip().lower()   # auto / true / false
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+# Modèle d'embeddings pour le RAG sémantique avec MLX (optionnel, multilingue).
+# Sans lui, le RAG fonctionne en mode lexical (mots-clés). Voir requirements-rag.txt.
+EMBED_MODEL = os.getenv("EMBED_MODEL",
+                        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 _default_db = f"sqlite:///{BASE_DIR / 'data' / 'app.db'}"
 DATABASE_URL = os.getenv("DATABASE_URL", _default_db)

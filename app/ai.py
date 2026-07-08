@@ -224,9 +224,9 @@ def handle_user_message(session, user: User, text: str) -> str:
     #  - petit modèle local (mlx) : fenêtre moyenne (rapide et nette) ;
     #  - Claude : fenêtre large.
     # Mémoire longue (portrait + préférences) : toujours réinjectée dans le prompt.
-    use_rag = llm.rag_enabled()
+    use_rag = rag.enabled()
     if use_rag:
-        window = 6
+        window = 8            # mémoire courte + souvenirs RAG (mémoire longue déportée)
     elif llm.provider() == "claude":
         window = config.CONVERSATION_WINDOW
     else:
