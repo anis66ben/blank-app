@@ -142,14 +142,21 @@ def _claude():
 # ---------------------------------------------------------------------------
 # Interface publique
 # ---------------------------------------------------------------------------
-def chat_structured(system: str, messages: list[dict], model_cls: Type[T]) -> T:
+def chat_structured(system: str, messages: list[dict], model_cls: Type[T],
+                    meta: dict | None = None) -> T:
     """Réponse structurée validée contre un modèle Pydantic.
 
     En cas d'échec du format structuré (fréquent avec un petit modèle local),
-    replie sur une réponse texte simple encapsulée : le champ nommé dans
-    `_TEXT_FALLBACK_FIELD` reçoit le texte, les autres champs restent vides.
-    Garantit que le bot répond toujours quelque chose."""
+    replie sur une réponse texte simple encapsulée : le champ 'reply' reçoit le
+    texte, les autres champs restent vides. Garantit que le bot répond toujours.
+
+    `meta` (optionnel) est rempli avec la sortie brute et l'usage du repli, pour
+    le journal d'étude du comportement."""
     prov = provider()
+    if meta is None:
+        meta = {}
+    meta["provider"] = prov
+
     if prov == "claude":
         resp = _claude().messages.parse(
             model=config.CLAUDE_MODEL, max_tokens=2048,
@@ -158,16 +165,20 @@ def chat_structured(system: str, messages: list[dict], model_cls: Type[T]) -> T:
         out = resp.parsed_output
         if out is None:
             raise RuntimeError("Réponse Claude non structurée")
+        meta["fallback"] = False
         return out
 
     if prov == "ollama":
         schema = model_cls.model_json_schema()
         raw = _ollama_chat(system, messages, fmt=schema)
+        meta["raw"] = raw
         try:
             data = json.loads(raw)
+            meta["fallback"] = False
             return model_cls.model_validate(data)
         except Exception:
             log.warning("Sortie structurée Ollama invalide, repli texte simple : %.200s", raw)
+            meta["fallback"] = True
             return _text_fallback(model_cls, raw or _plain_reply(system, messages))
 
     if prov == "mlx":
@@ -177,15 +188,19 @@ def chat_structured(system: str, messages: list[dict], model_cls: Type[T]) -> T:
                        "autour ni balise de code, strictement conforme à ce schéma :\n"
                        + json.dumps(schema, ensure_ascii=False))
         raw = mlx_backend.generate_text(json_system, messages)
+        meta["raw"] = raw
         data = _extract_json(raw)
         if data is not None:
             try:
-                return model_cls.model_validate(data)
+                out = model_cls.model_validate(data)
+                meta["fallback"] = False
+                return out
             except Exception:
                 log.warning("JSON MLX non conforme au schéma, repli texte")
         else:
             log.warning("Aucun JSON exploitable dans la sortie MLX, repli texte")
         # repli : une réponse conversationnelle simple, sans extraction structurée
+        meta["fallback"] = True
         try:
             plain = mlx_backend.generate_text(system, messages)
         except Exception:

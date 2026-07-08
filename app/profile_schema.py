@@ -158,7 +158,7 @@ class PreferenceSignal(BaseModel):
 class BotTurn(BaseModel):
     """Réponse complète du bot pour un tour de conversation."""
     reply: str = Field(description="Message à envoyer à l'utilisateur, en français, chaleureux et naturel")
-    updates: ProfileUpdates
+    updates: ProfileUpdates = Field(default_factory=ProfileUpdates)
     asked_topic: Optional[str] = Field(
         None, description="Clé du champ de profil sur lequel porte la question posée dans reply, s'il y en a une")
     memory_notes: List[str] = Field(

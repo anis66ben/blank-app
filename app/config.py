@@ -59,3 +59,7 @@ MIN_COMPLETENESS_FOR_MATCHING = int(os.getenv("MIN_COMPLETENESS_FOR_MATCHING", "
 
 # Nombre de messages d'historique envoyés au modèle à chaque tour
 CONVERSATION_WINDOW = int(os.getenv("CONVERSATION_WINDOW", "30"))
+
+# Journal des conversations (pour étudier le comportement du modèle).
+CONVERSATION_LOG = os.getenv("CONVERSATION_LOG", "true").strip().lower() == "true"
+CONV_LOG_PATH = os.getenv("CONV_LOG_PATH", str(BASE_DIR / "data" / "conversation_log.jsonl"))

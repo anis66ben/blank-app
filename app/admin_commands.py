@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import datetime as dt
 import functools
+import json
 import logging
+from pathlib import Path
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -26,6 +28,7 @@ HELP_TEXT = (
     "• /fiche `<id>` — fiche complète d'un membre\n"
     "• /matchs — derniers matchs et scores\n"
     "• /conv `<id>` — derniers échanges bot ↔ membre\n"
+    "• /journal `[n]` — comportement du modèle (n derniers tours)\n"
     "• /publier `question|quiz|regles|stats` — publier dans le groupe\n"
 )
 
@@ -184,6 +187,41 @@ async def cmd_conv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @admin_only
+async def cmd_journal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Résumé des derniers tours (comportement du modèle) depuis le journal."""
+    n = 5
+    if context.args and context.args[0].isdigit():
+        n = min(int(context.args[0]), 15)
+    path = Path(config.CONV_LOG_PATH)
+    if not path.exists():
+        await update.message.reply_text("Journal vide pour l'instant (aucun échange enregistré).")
+        return
+    lines = path.read_text(encoding="utf-8").strip().splitlines()[-n:]
+    if not lines:
+        await update.message.reply_text("Journal vide.")
+        return
+    blocks = []
+    for ln in lines:
+        try:
+            r = json.loads(ln)
+        except Exception:
+            continue
+        flag = "⚠️repli" if r.get("fallback") else "✓"
+        sigs = ", ".join(f"{s.get('cle')}({s.get('orientation','')[:3]})"
+                         for s in r.get("preference_signals", [])) or "—"
+        upd = ", ".join(f"{k}={v}" for k, v in (r.get("updates") or {}).items()) or "—"
+        um = (r.get("user_message") or "")[:120]
+        rep = (r.get("reply") or "")[:160]
+        blocks.append(
+            f"🕐 {r.get('ts','')[-8:]} · {r.get('duration_s','?')}s · {flag}\n"
+            f"👤 {um}\n🤖 {rep}\n"
+            f"📊 infos: {upd}\n🧭 préf.: {sigs}")
+    await update.message.reply_text(
+        f"📓 *{len(blocks)} derniers tours* (modèle : {config.MLX_MODEL if ai.llm.provider()=='mlx' else ai.llm.provider()})\n\n"
+        + "\n\n".join(blocks), parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
 async def cmd_publier(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not config.COMMUNITY_CHAT_ID:
         await update.message.reply_text(
@@ -215,4 +253,5 @@ def register(app) -> None:
     app.add_handler(CommandHandler("fiche", cmd_fiche))
     app.add_handler(CommandHandler("matchs", cmd_matchs))
     app.add_handler(CommandHandler("conv", cmd_conv))
+    app.add_handler(CommandHandler("journal", cmd_journal))
     app.add_handler(CommandHandler("publier", cmd_publier))

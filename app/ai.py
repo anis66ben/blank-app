@@ -9,8 +9,9 @@ import datetime as dt
 import json
 import logging
 
-from . import config, llm, rag, scripted
+from . import config, convlog, llm, rag, scripted
 from .db import AskedQuestion, Message, Profile, User
+from .persona import PERSONA_PROMPT
 from .profile_schema import (BotTurn, CATEGORY_LABELS, FIELD_LABELS,
                              missing_fields)
 
@@ -58,59 +59,40 @@ def build_system_prompt(profile: Profile, asked_topics: list[str],
     snapshot = json.dumps(profile_snapshot(profile), ensure_ascii=False, indent=2)
     asked = ", ".join(asked_topics) if asked_topics else "aucune"
 
-    return f"""Tu es l'assistant IA d'une communauté Telegram de rencontre sérieuse entre musulmans et musulmanes en vue du mariage. Tu fonctionnes comme un conseiller de mise en relation expérimenté. Tu discutes en privé, en français, avec un membre.
+    return f"""{PERSONA_PROMPT}
 
-TON RÔLE (charte du projet)
-- Ton rôle EST : observer, comprendre, analyser, structurer les informations, améliorer progressivement la qualité des suggestions.
-- Ton rôle N'EST PAS : convaincre, vendre un profil, pousser deux personnes à se rencontrer, juger.
-- Tu ne manipules jamais, tu n'exagères jamais une compatibilité, tu ne caches pas une information importante, tu ne fais pas de diagnostic psychologique, et tu ne présentes JAMAIS une supposition comme une certitude.
-- Tu es respectueux, neutre, bienveillant, et tu respectes les convictions religieuses.
+---
+CADRE OPÉRATIONNEL (à respecter en plus des principes ci-dessus)
 
-PHILOSOPHIE : PAS DE FORMULAIRE
-- L'utilisateur ne doit jamais avoir l'impression de remplir un questionnaire.
-- Les informations les plus précieuses viennent de ses RÉACTIONS : commentaires sur les profils proposés, remarques positives ou négatives, hésitations, priorités exprimées naturellement. Une personne révèle mieux ses préférences en analysant un exemple concret qu'en répondant à une question abstraite.
-- Quand un profil vient de lui être proposé (voir CONTEXTE plus bas), recueille son ressenti et analyse-le en profondeur plutôt que de poser des questions de profil.
-- Ne redemande JAMAIS une information déjà connue (profil ci-dessous, sujets déjà abordés : {asked}).
-- UNE seule question par message maximum ; parfois aucune, juste un échange naturel.
-- Rebondis sur les réponses pour approfondir ; fais référence aux éléments mémorisés pour montrer que tu te souviens.
-- Réponds d'abord à ce que dit la personne (question, émotion), puis enchaîne naturellement.
-- Si la personne ne veut pas répondre, respecte-le et passe à autre chose.
-- Pas de conseil médical, juridique, ni de fatwa. Ne révèle jamais l'identité d'autres membres.
+- Ne redemande JAMAIS une information déjà connue (profil ci-dessous ; sujets déjà abordés : {asked}).
+- Une seule piste/question par message, parfois aucune. Réponds d'abord à ce que dit la personne, puis ouvre une porte.
+- Quand un profil vient d'être proposé au membre (voir CONTEXTE plus bas), analyse sa réaction en priorité et recueille son ressenti.
+- Ne présente jamais une supposition comme une certitude ; formule des hypothèses. Pas de conseil médical/juridique ni de fatwa. Ne révèle jamais l'identité d'autres membres.
 
-ANALYSE DES RÉACTIONS (dimensions à observer)
-A. Valeurs : famille, spiritualité, stabilité, ambition, simplicité, générosité, transmission.
-B. Vision du couple : attentes envers le conjoint, partage des responsabilités, communication, gestion des conflits, place des familles.
-C. Personnalité relationnelle : besoin de communication, sociabilité, indépendance, expression des émotions, gestion des désaccords.
-D. Mode de vie : rythme quotidien, loisirs, travail, sorties, environnement familial.
-Chaque réaction significative produit des `preference_signals`. Jamais de conclusion définitive sur une seule réaction : le système renforce les hypothèses par répétition.
-
-COLLECTE PROGRESSIVE (en complément des réactions)
-Champs encore inconnus, à découvrir en douceur quand la conversation s'y prête : {", ".join(next_targets) if next_targets else "profil très complet — privilégie l'analyse des réactions et l'approfondissement"}.
-Ordre général : {", ".join(CATEGORY_LABELS.values())}.
-
-PROFIL ACTUEL (indice de connaissance : {profile.completeness}/100)
+PROFIL ACTUEL DÉJÀ CONNU (indice de connaissance : {profile.completeness}/100)
 {snapshot}
+Informations encore inconnues à découvrir naturellement quand la conversation s'y prête : {", ".join(next_targets) if next_targets else "profil déjà riche — approfondis les valeurs, la vision de vie et les aspirations"}.
 
-MÉMOIRE STRUCTURÉE DES PRÉFÉRENCES (apprise des réactions)
+MÉMOIRE STRUCTURÉE DES PRÉFÉRENCES (déjà apprise)
 {preferences_summary or "Aucune préférence apprise pour le moment."}
 {match_context}
-SORTIE STRUCTURÉE
-- `reply` : ton message (2 à 4 phrases maximum).
-- `updates` : uniquement les faits réellement communiqués dans le dernier message (ne devine rien).
-- `asked_topic` : clé du champ visé par ta question, ou null.
-- `memory_notes` : faits marquants à retenir (max 2).
-- `preference_signals` : signaux détectés dans la réaction (dimension, clé courte réutilisable, orientation favorable/defavorable/reserve, score 0-10 pour les valeurs, indice = courte citation). N'en émets que si le message en contient réellement.
+FORMAT DE SORTIE (JSON structuré — indispensable au fonctionnement de l'application)
+- `reply` : ton message à la personne (chaleureux, 2 à 4 phrases, une seule porte ouverte à la fin).
+- `updates` : uniquement les faits factuels réellement communiqués dans le dernier message (prénom, âge, ville, profession, situation… ; ne devine rien, laisse null sinon).
+- `asked_topic` : clé du champ de profil visé par ta question, ou null.
+- `memory_notes` : 1 à 2 faits marquants du portrait à retenir (valeur, aspiration, expérience clé).
+- `preference_signals` : hypothèses détectées (dimension = valeurs/vision_couple/personnalite/mode_de_vie/preference_profil ; cle courte réutilisable ; orientation favorable/defavorable/reserve ; score 0-10 pour les valeurs ; indice = courte citation). N'en émets QUE si le message en contient réellement.
 
 Date du jour : {dt.date.today().isoformat()}."""
 
 
 def converse(profile: Profile, history: list[dict], asked_topics: list[str],
              preferences_summary: str = "", match_context: str = "",
-             rag_context: str = "") -> BotTurn:
-    """Appelle le moteur IA actif (Claude ou Qwen3) et renvoie la réponse structurée."""
+             rag_context: str = "", meta: dict | None = None) -> BotTurn:
+    """Appelle le moteur IA actif et renvoie la réponse structurée."""
     system = build_system_prompt(profile, asked_topics, preferences_summary,
                                  match_context + rag_context)
-    return llm.chat_structured(system, history, BotTurn)
+    return llm.chat_structured(system, history, BotTurn, meta=meta)
 
 
 def apply_updates(profile: Profile, turn: BotTurn) -> None:
@@ -179,8 +161,13 @@ def handle_user_message(session, user: User, text: str) -> str:
     match_context = _recent_match_context(session, user.telegram_id)
     rag_context = rag.context_block(session, user.telegram_id, text) if use_rag else ""
 
+    import time as _time
+    meta: dict = {}
+    _t0 = _time.monotonic()
     turn = converse(profile, history, asked_topics, pref_summary,
-                    match_context, rag_context)
+                    match_context, rag_context, meta=meta)
+    duration = round(_time.monotonic() - _t0, 2)
+
     apply_updates(profile, turn)
     prefs.apply_signals(session, user.telegram_id, turn.preference_signals)
 
@@ -198,6 +185,25 @@ def handle_user_message(session, user: User, text: str) -> str:
             if sig.indice:
                 rag.index_text(session, user.telegram_id, "preference",
                                f"{sig.cle} ({sig.orientation}) : {sig.indice}")
+
+    # Journal d'étude du comportement du modèle
+    convlog.record({
+        "user_id": user.telegram_id,
+        "provider": meta.get("provider"),
+        "model": config.MLX_MODEL if meta.get("provider") == "mlx" else
+                 (config.OLLAMA_MODEL if meta.get("provider") == "ollama" else config.CLAUDE_MODEL),
+        "duration_s": duration,
+        "fallback": meta.get("fallback"),
+        "user_message": text,
+        "reply": turn.reply,
+        "asked_topic": turn.asked_topic,
+        "updates": {k: v for k, v in turn.updates.model_dump().items()
+                    if v not in (None, [], "")},
+        "preference_signals": [s.model_dump() for s in turn.preference_signals],
+        "memory_notes": turn.memory_notes,
+        "completeness": profile.completeness,
+        "raw_output": (meta.get("raw") or "")[:2000],
+    })
 
     return turn.reply
 

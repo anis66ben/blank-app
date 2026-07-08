@@ -9,6 +9,19 @@ service externe requis).
 
 ## Fonctionnalités
 
+### 🧬 Persona & journal d'étude
+Le comportement conversationnel du bot est défini par un prompt « expert en
+découverte de personnalité » isolé dans **`app/persona.py`** (facile à étudier
+et ajuster) : conversation naturelle plutôt que questionnaire, histoires plutôt
+qu'opinions, exploration progressive (identité, valeurs, vision du monde,
+relations, mode de vie, aspirations), mémoire structurée par hypothèses.
+
+Chaque tour est enregistré dans **`data/conversation_log.jsonl`** (`app/convlog.py`)
+pour étudier le modèle : message reçu, sortie brute, réponse, infos extraites,
+préférences détectées, durée, repli éventuel. Consultable depuis le téléphone
+via la commande **`/journal [n]`**, ou en ouvrant le fichier
+(`cat data/conversation_log.jsonl`). Désactivable avec `CONVERSATION_LOG=false`.
+
 ### 🤖 Bot Telegram (`app/bot.py`)
 - **Collecte intelligente et progressive** : pas de long questionnaire — le bot
   pose une question à la fois, rebondit sur les réponses ("Tu aimes voyager ?
