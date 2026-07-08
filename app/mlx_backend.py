@@ -77,20 +77,41 @@ def _build_prompt(tokenizer, system: str, messages: list[dict]) -> str:
         return tokenizer.apply_chat_template(chat, **kwargs)
 
 
+def _sampling_kwargs() -> dict:
+    """Température + pénalité de répétition : indispensables pour éviter des
+    réponses identiques et en boucle (la génération par défaut est déterministe).
+    Tolérant aux variations d'API de mlx-lm."""
+    kwargs: dict = {}
+    try:
+        from mlx_lm.sample_utils import make_logits_processors, make_sampler
+        kwargs["sampler"] = make_sampler(temp=config.MLX_TEMP, top_p=0.95)
+        kwargs["logits_processors"] = make_logits_processors(
+            repetition_penalty=config.MLX_REPETITION_PENALTY,
+            repetition_context_size=40)
+    except Exception:
+        log.debug("Échantillonnage avancé mlx-lm indisponible", exc_info=False)
+    return kwargs
+
+
 def generate_text(system: str, messages: list[dict], max_tokens: int | None = None) -> str:
     """Génère une réponse texte. Sérialisé pour éviter les appels concurrents."""
     model, tokenizer = ensure_loaded()
     prompt = _build_prompt(tokenizer, system, messages)
     max_tokens = max_tokens or config.MLX_MAX_TOKENS
+    sampling = _sampling_kwargs()
 
     from mlx_lm import generate
     t0 = time.monotonic()
     with _lock:
         try:
             text = generate(model, tokenizer, prompt=prompt,
-                            max_tokens=max_tokens, verbose=False)
+                            max_tokens=max_tokens, verbose=False, **sampling)
         except TypeError:
-            # Signatures plus anciennes/récentes de mlx-lm
-            text = generate(model, tokenizer, prompt, max_tokens=max_tokens)
+            # Signature de mlx-lm qui n'accepte pas sampler/logits_processors
+            try:
+                text = generate(model, tokenizer, prompt=prompt,
+                                max_tokens=max_tokens, verbose=False)
+            except TypeError:
+                text = generate(model, tokenizer, prompt, max_tokens=max_tokens)
     log.info("Génération MLX en %.1fs", time.monotonic() - t0)
     return _strip_think(text)

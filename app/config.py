@@ -22,6 +22,10 @@ CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-4-8")
 MLX_MODEL = os.getenv("MLX_MODEL", "mlx-community/Qwen3-4B-4bit")
 MLX_MAX_TOKENS = int(os.getenv("MLX_MAX_TOKENS", "400"))
 MLX_THINK = os.getenv("MLX_THINK", "false").strip().lower() == "true"
+# Variété des réponses : température > 0 évite les réponses identiques en boucle ;
+# la pénalité de répétition empêche le modèle de se répéter.
+MLX_TEMP = float(os.getenv("MLX_TEMP", "0.7"))
+MLX_REPETITION_PENALTY = float(os.getenv("MLX_REPETITION_PENALTY", "1.15"))
 
 # Ollama local (alternative à MLX)
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
