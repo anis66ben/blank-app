@@ -149,6 +149,20 @@ class Match(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class MemoryChunk(Base):
+    """Mémoire vectorielle pour le RAG (« fenêtre de contexte déportée »).
+    Chaque souvenir (fait, réaction, préférence) est stocké avec son embedding ;
+    seuls les plus pertinents sont réinjectés dans le prompt à chaque tour."""
+    __tablename__ = "memory_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.telegram_id"), index=True)
+    kind: Mapped[str] = mapped_column(String(24))          # fait / reaction / preference / echange
+    text: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list] = mapped_column(JSON)          # vecteur (liste de flottants)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
 class CommunityPost(Base):
     """Historique des publications d'animation communautaire."""
     __tablename__ = "community_posts"

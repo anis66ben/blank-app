@@ -9,9 +9,7 @@ import datetime as dt
 import json
 import logging
 
-import anthropic
-
-from . import config, scripted
+from . import config, llm, rag, scripted
 from .db import AskedQuestion, Message, Profile, User
 from .profile_schema import (BotTurn, CATEGORY_LABELS, FIELD_LABELS,
                              missing_fields)
@@ -20,17 +18,8 @@ log = logging.getLogger(__name__)
 
 
 def ai_enabled() -> bool:
-    """L'IA est active si une clé API est configurée ; sinon, mode guidé."""
-    return bool(config.ANTHROPIC_API_KEY)
-
-_client: anthropic.Anthropic | None = None
-
-
-def get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY or None)
-    return _client
+    """Vrai si un moteur IA (Claude ou Ollama/Qwen3) est actif ; sinon mode guidé."""
+    return llm.enabled()
 
 
 def profile_snapshot(profile: Profile) -> dict:
@@ -116,21 +105,12 @@ Date du jour : {dt.date.today().isoformat()}."""
 
 
 def converse(profile: Profile, history: list[dict], asked_topics: list[str],
-             preferences_summary: str = "", match_context: str = "") -> BotTurn:
-    """Appelle Claude et renvoie la réponse structurée du tour."""
-    client = get_client()
-    system = build_system_prompt(profile, asked_topics, preferences_summary, match_context)
-    response = client.messages.parse(
-        model=config.CLAUDE_MODEL,
-        max_tokens=2048,
-        system=[{"type": "text", "text": system}],
-        messages=history,
-        output_format=BotTurn,
-    )
-    turn = response.parsed_output
-    if turn is None:  # sécurité : réponse non conforme
-        raise RuntimeError("Réponse du modèle non structurée")
-    return turn
+             preferences_summary: str = "", match_context: str = "",
+             rag_context: str = "") -> BotTurn:
+    """Appelle le moteur IA actif (Claude ou Qwen3) et renvoie la réponse structurée."""
+    system = build_system_prompt(profile, asked_topics, preferences_summary,
+                                 match_context + rag_context)
+    return llm.chat_structured(system, history, BotTurn)
 
 
 def apply_updates(profile: Profile, turn: BotTurn) -> None:
@@ -179,13 +159,16 @@ def handle_user_message(session, user: User, text: str) -> str:
     session.add(Message(user_id=user.telegram_id, role="user", content=text))
     session.flush()
 
+    # RAG actif (Ollama) : fenêtre d'historique COURTE + souvenirs pertinents
+    # récupérés de la mémoire vectorielle. Sinon : fenêtre d'historique large.
+    use_rag = llm.rag_enabled()
+    window = 6 if use_rag else config.CONVERSATION_WINDOW
     rows = (session.query(Message)
             .filter(Message.user_id == user.telegram_id)
             .order_by(Message.created_at.desc(), Message.id.desc())
-            .limit(config.CONVERSATION_WINDOW).all())
+            .limit(window).all())
     history = [{"role": m.role, "content": m.content} for m in reversed(rows)]
-    # L'API exige que la conversation commence par un tour utilisateur
-    while history and history[0]["role"] != "user":
+    while history and history[0]["role"] != "user":  # commencer par un tour user
         history.pop(0)
 
     asked_topics = [q.topic for q in session.query(AskedQuestion)
@@ -194,8 +177,10 @@ def handle_user_message(session, user: User, text: str) -> str:
     from . import preferences as prefs
     pref_summary = prefs.summary_for_prompt(session, user.telegram_id)
     match_context = _recent_match_context(session, user.telegram_id)
+    rag_context = rag.context_block(session, user.telegram_id, text) if use_rag else ""
 
-    turn = converse(profile, history, asked_topics, pref_summary, match_context)
+    turn = converse(profile, history, asked_topics, pref_summary,
+                    match_context, rag_context)
     apply_updates(profile, turn)
     prefs.apply_signals(session, user.telegram_id, turn.preference_signals)
 
@@ -203,6 +188,17 @@ def handle_user_message(session, user: User, text: str) -> str:
         session.add(AskedQuestion(user_id=user.telegram_id, topic=turn.asked_topic))
 
     session.add(Message(user_id=user.telegram_id, role="assistant", content=turn.reply))
+
+    # Indexation dans la mémoire vectorielle (déport du contexte)
+    if use_rag:
+        rag.index_text(session, user.telegram_id, "echange", f"Il a dit : {text}")
+        for note in turn.memory_notes:
+            rag.index_text(session, user.telegram_id, "fait", note)
+        for sig in turn.preference_signals:
+            if sig.indice:
+                rag.index_text(session, user.telegram_id, "preference",
+                               f"{sig.cle} ({sig.orientation}) : {sig.indice}")
+
     return turn.reply
 
 
@@ -253,22 +249,16 @@ def generate_profile_presentation(other: Profile) -> str | None:
         "habitudes": (other.lifestyle_facts or [])[:4],
     }, ensure_ascii=False)
     try:
-        client = get_client()
-        response = client.messages.create(
-            model=config.CLAUDE_MODEL,
-            max_tokens=1024,
-            messages=[{"role": "user", "content":
-                "Rédige la présentation anonymisée d'un profil pour une plateforme de "
-                "rencontre musulmane sérieuse, à partir de ces informations factuelles :\n"
-                f"{facts}\n\n"
-                "Règles : en français, 3 à 5 phrases chaleureuses et humaines ; commence par "
-                "« Ce frère » ou « Cette sœur » selon le sexe ; raconte la personne (valeurs, "
-                "façon d'être, ce qui compte pour elle) plutôt que d'énumérer des critères ; "
-                "n'invente RIEN qui ne soit pas dans les informations fournies ; ne révèle ni "
-                "prénom ni élément identifiant ; n'exagère pas la compatibilité. "
-                "Réponds uniquement par la présentation, sans préambule."}],
-        )
-        text = next((b.text for b in response.content if b.type == "text"), "").strip()
+        text = llm.chat_text(
+            "Rédige la présentation anonymisée d'un profil pour une plateforme de "
+            "rencontre musulmane sérieuse, à partir de ces informations factuelles :\n"
+            f"{facts}\n\n"
+            "Règles : en français, 3 à 5 phrases chaleureuses et humaines ; commence par "
+            "« Ce frère » ou « Cette sœur » selon le sexe ; raconte la personne (valeurs, "
+            "façon d'être, ce qui compte pour elle) plutôt que d'énumérer des critères ; "
+            "n'invente RIEN qui ne soit pas dans les informations fournies ; ne révèle ni "
+            "prénom ni élément identifiant ; n'exagère pas la compatibilité. "
+            "Réponds uniquement par la présentation, sans préambule.").strip()
         return text or None
     except Exception:
         log.exception("Présentation narrative indisponible, repli sur la fiche standard")
@@ -277,7 +267,7 @@ def generate_profile_presentation(other: Profile) -> str | None:
 
 def generate_community_text(kind: str, context: str = "") -> str:
     """Génère un contenu d'animation communautaire (question, quiz, rappel...).
-    Sans clé API — ou si l'appel échoue — utilise la banque de contenus statiques."""
+    Sans IA — ou si l'appel échoue — utilise la banque de contenus statiques."""
     if not ai_enabled():
         return scripted.static_community_text(kind)
     prompts = {
@@ -291,11 +281,9 @@ def generate_community_text(kind: str, context: str = "") -> str:
                          "rencontre entre musulmans : respect, pudeur dans les échanges, pas de contact "
                          "privé non sollicité, signaler les abus. 4 à 5 lignes avec des puces, sans préambule.",
     }
-    client = get_client()
-    response = client.messages.create(
-        model=config.CLAUDE_MODEL,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompts.get(kind, prompts["question"]) +
-                   (f"\nContexte : {context}" if context else "")}],
-    )
-    return next((b.text for b in response.content if b.type == "text"), "").strip()
+    try:
+        return llm.chat_text(prompts.get(kind, prompts["question"]) +
+                             (f"\nContexte : {context}" if context else "")).strip()
+    except Exception:
+        log.exception("Génération communautaire indisponible, repli statique")
+        return scripted.static_community_text(kind)
