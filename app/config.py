@@ -59,6 +59,10 @@ MIN_COMPLETENESS_FOR_MATCHING = int(os.getenv("MIN_COMPLETENESS_FOR_MATCHING", "
 
 # Nombre de messages d'historique envoyés au modèle à chaque tour
 CONVERSATION_WINDOW = int(os.getenv("CONVERSATION_WINDOW", "30"))
+# Fenêtre d'historique pour les petits modèles locaux (mlx) : plus courte que
+# Claude pour rester rapide et net, complétée par la mémoire persistante
+# (portrait + préférences, toujours réinjectés).
+LOCAL_HISTORY_WINDOW = int(os.getenv("LOCAL_HISTORY_WINDOW", "14"))
 
 # Journal des conversations (pour étudier le comportement du modèle).
 CONVERSATION_LOG = os.getenv("CONVERSATION_LOG", "true").strip().lower() == "true"

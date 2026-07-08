@@ -105,7 +105,12 @@ Préférences déjà comprises : {preferences_summary or "aucune"}.
 Pistes à explorer en douceur : {", ".join(next_targets) if next_targets else "ses valeurs, sa vision de la vie, ses aspirations"}.
 {extra_context}
 CONSIGNE POUR CE MESSAGE :
-Réponds maintenant, en français, au DERNIER message de la personne. Rebondis vraiment sur ce qu'elle vient de dire (ne réponds pas à côté). 2 à 4 phrases, chaleureux et naturel. Termine par UNE seule question ouverte qui l'aide à se raconter (une histoire, un souvenir, ce qui compte pour elle) — jamais une liste de questions. Ne répète JAMAIS une formule que tu as déjà employée dans la conversation. Écris uniquement ton message, sans guillemets ni préambule."""
+Les messages précédents de votre conversation te sont fournis (historique). APPUIE-TOI dessus :
+- assure une vraie continuité : rebondis sur ce que la personne vient de dire ET sur ce qu'elle t'a confié plus tôt ;
+- fais référence à ce qu'elle t'a déjà raconté quand c'est pertinent (« tu m'avais dit que… », « tu m'as parlé de… ») ;
+- ne repose JAMAIS une question déjà posée, ne répète JAMAIS une formule déjà employée ;
+- fais progresser la découverte vers un aspect encore inexploré.
+Réponds maintenant, en français, au DERNIER message : 2 à 4 phrases, chaleureux et naturel, en terminant par UNE seule question ouverte qui aide la personne à se raconter (une histoire, un souvenir, ce qui compte pour elle). Écris uniquement ton message, sans guillemets ni préambule."""
 
 
 EXTRACT_PROMPT = """Tu es un extracteur d'informations pour un profil de rencontre. À partir UNIQUEMENT du message du membre ci-dessous, renseigne les champs qu'il a EXPLICITEMENT écrits DANS CE MESSAGE.
@@ -214,10 +219,18 @@ def handle_user_message(session, user: User, text: str) -> str:
     session.add(Message(user_id=user.telegram_id, role="user", content=text))
     session.flush()
 
-    # RAG actif (Ollama) : fenêtre d'historique COURTE + souvenirs pertinents
-    # récupérés de la mémoire vectorielle. Sinon : fenêtre d'historique large.
+    # Mémoire courte (historique récent) — calibrée selon le moteur :
+    #  - Ollama+RAG : fenêtre courte + souvenirs pertinents récupérés (vectoriel) ;
+    #  - petit modèle local (mlx) : fenêtre moyenne (rapide et nette) ;
+    #  - Claude : fenêtre large.
+    # Mémoire longue (portrait + préférences) : toujours réinjectée dans le prompt.
     use_rag = llm.rag_enabled()
-    window = 6 if use_rag else config.CONVERSATION_WINDOW
+    if use_rag:
+        window = 6
+    elif llm.provider() == "claude":
+        window = config.CONVERSATION_WINDOW
+    else:
+        window = config.LOCAL_HISTORY_WINDOW
     rows = (session.query(Message)
             .filter(Message.user_id == user.telegram_id)
             .order_by(Message.created_at.desc(), Message.id.desc())
