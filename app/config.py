@@ -23,7 +23,11 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip(
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
-LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "120"))
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "180"))
+# Raisonnement Qwen3 : désactivé par défaut (bien plus rapide). true pour l'activer.
+OLLAMA_THINK = os.getenv("OLLAMA_THINK", "false").strip().lower() == "true"
+# Maintient le modèle chargé en mémoire (évite le rechargement à chaque message).
+OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
 
 # RAG (mémoire vectorielle : « fenêtre de contexte déportée »)
 RAG_ENABLED = os.getenv("RAG_ENABLED", "auto").strip().lower()   # auto / true / false

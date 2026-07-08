@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Type, TypeVar
 
 from pydantic import BaseModel
@@ -81,17 +82,46 @@ def _ollama_post(path: str, body: dict) -> dict:
     return r.json()
 
 
+def _inject_no_think(messages: list[dict]) -> list[dict]:
+    """Ajoute le marqueur /no_think de Qwen3 au dernier message (robustesse
+    multi-versions d'Ollama : complète le champ think:false)."""
+    if not messages:
+        return messages
+    msgs = [dict(m) for m in messages]
+    if "/no_think" not in msgs[-1].get("content", ""):
+        msgs[-1]["content"] = msgs[-1]["content"] + " /no_think"
+    return msgs
+
+
 def _ollama_chat(system: str, messages: list[dict], fmt: dict | None) -> str:
+    msgs = ([{"role": "system", "content": system}] if system else []) + messages
+    if not config.OLLAMA_THINK:
+        msgs = _inject_no_think(msgs)
     body = {
         "model": config.OLLAMA_MODEL,
-        "messages": ([{"role": "system", "content": system}] if system else []) + messages,
+        "messages": msgs,
         "stream": False,
-        "think": False,                       # désactive le raisonnement Qwen3
+        "keep_alive": config.OLLAMA_KEEP_ALIVE,   # garde le modèle en mémoire
         "options": {"temperature": 0.7, "num_ctx": config.OLLAMA_NUM_CTX},
     }
+    if not config.OLLAMA_THINK:
+        body["think"] = False                     # désactive le raisonnement Qwen3
     if fmt is not None:
         body["format"] = fmt
-    data = _ollama_post("/api/chat", body)
+
+    start = time.monotonic()
+    try:
+        data = _ollama_post("/api/chat", body)
+    except Exception as exc:
+        # Certaines versions d'Ollama rejettent le champ "think" : réessai sans lui
+        if "think" in body:
+            log.warning("Ollama a rejeté 'think', réessai sans (%s)", exc)
+            body.pop("think", None)
+            data = _ollama_post("/api/chat", body)
+        else:
+            raise
+    log.info("Ollama chat en %.1fs (%s)", time.monotonic() - start,
+             "structuré" if fmt else "texte")
     return _strip_think(data.get("message", {}).get("content", ""))
 
 

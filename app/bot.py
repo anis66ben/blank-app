@@ -109,24 +109,38 @@ async def cmd_reprendre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # ---------------------------------------------------------------------------
 # Conversation libre -> IA
 # ---------------------------------------------------------------------------
+async def _keep_typing(bot, chat_id: int) -> None:
+    """Rafraîchit l'indicateur « en train d'écrire » (il expire au bout de ~5 s),
+    pour que le membre voie que le bot travaille pendant une génération longue."""
+    try:
+        while True:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
+
+
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_chat.type != "private":
         return  # l'IA ne répond qu'en privé
     tg_user = update.effective_user
     text = update.message.text
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id,
-                                       action=ChatAction.TYPING)
 
     def _turn() -> str:
         with db_session() as session:
             user = get_or_create_user(session, tg_user.id, tg_user.username, tg_user.full_name)
             return ai.handle_user_message(session, user, text)
 
+    # Indicateur « écrit… » maintenu pendant toute la génération (Qwen3 local
+    # peut prendre plusieurs secondes, surtout au premier message).
+    typing = asyncio.create_task(_keep_typing(context.bot, update.effective_chat.id))
     try:
         reply = await asyncio.to_thread(_turn)
     except Exception:
         log.exception("Échec du tour de conversation pour %s", tg_user.id)
         reply = AI_ERROR_REPLY
+    finally:
+        typing.cancel()
     await update.message.reply_text(reply)
 
 
