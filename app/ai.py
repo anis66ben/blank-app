@@ -12,7 +12,8 @@ import logging
 from . import config, convlog, llm, rag, scripted
 from .db import AskedQuestion, Message, Profile, User
 from .persona import PERSONA_BRIEF, PERSONA_PROMPT
-from .profile_schema import (BotTurn, CATEGORY_LABELS, Extraction, FIELD_LABELS,
+from .profile_schema import (BotTurn, CATEGORY_LABELS, COMPLETENESS_WEIGHTS,
+                             Extraction, FIELD_LABELS, LIST_FIELD_TARGETS,
                              missing_fields)
 
 log = logging.getLogger(__name__)
@@ -89,29 +90,35 @@ Date du jour : {dt.date.today().isoformat()}."""
 def build_reply_prompt(profile: Profile, asked_topics: list[str],
                        preferences_summary: str = "", extra_context: str = "") -> str:
     """Prompt pour la RÉPONSE conversationnelle seule (texte, sans JSON).
-    Utilisé avec les petits modèles locaux : ils conversent bien mieux sans la
-    charge du format structuré."""
+    Le profil connu est un CONTEXTE PRIVÉ (pour ne pas reposer une question),
+    jamais à réciter — sinon le petit modèle énonce les traits du profil et part
+    hors sujet."""
     missing = missing_fields(profile)
     next_targets = [FIELD_LABELS.get(f, f) for f in missing[:3]]
-    snapshot = json.dumps(profile_snapshot(profile), ensure_ascii=False)
+    known = [FIELD_LABELS.get(f, f) for f in COMPLETENESS_WEIGHTS
+             if f not in LIST_FIELD_TARGETS and getattr(profile, f, None)]
+    if profile.age:
+        known.append("âge")
     asked = ", ".join(asked_topics) if asked_topics else "aucune"
     return f"""{PERSONA_BRIEF}
 
 ---
-CE QUE TU SAIS DÉJÀ SUR CETTE PERSONNE (ne le redemande pas) :
-{snapshot}
-Sujets déjà abordés : {asked}.
-Préférences déjà comprises : {preferences_summary or "aucune"}.
-Pistes à explorer en douceur : {", ".join(next_targets) if next_targets else "ses valeurs, sa vision de la vie, ses aspirations"}.
+CONTEXTE PRIVÉ (pour toi seul — NE le récite JAMAIS à la personne, ne lui décris pas son propre caractère ni ses goûts) :
+- Prénom : {profile.pseudo or "inconnu"}
+- Déjà connu, donc à NE PAS redemander : {", ".join(known) if known else "rien encore"}
+- Questions déjà posées : {asked}
+- Préférences déjà comprises : {preferences_summary or "aucune"}
+- À découvrir plus tard, en douceur : {", ".join(next_targets) if next_targets else "ses valeurs, sa vision de la vie, ses aspirations"}
 {extra_context}
-RÈGLES POUR TA RÉPONSE — LES PLUS IMPORTANTES, À SUIVRE ABSOLUMENT :
-1. RESTE SUR SON SUJET. Réponds VRAIMENT à ce que la personne vient d'écrire. Si elle pose une question, réponds-y d'abord. Si elle raconte quelque chose, réagis précisément à CE qu'elle a dit — n'enchaîne pas sur un tout autre thème.
-2. ADAPTE-TOI À SON REGISTRE. Si elle dit juste « salam », « ça va », « ok », reste simple, léger et bref ; NE lance PAS de grande question philosophique. Tu n'approfondis (valeurs, vision, histoire) que lorsqu'elle s'ouvre d'elle-même.
-3. UNE seule question, courte et DIRECTEMENT CONNECTÉE à ce qu'elle vient de dire — le prolongement naturel de son propos, jamais une question générale plaquée ni un exemple recopié de ce prompt.
-4. Appuie-toi sur l'historique : ne repose jamais une question déjà posée, et fais référence à ce qu'elle t'a confié quand c'est pertinent (« tu m'avais dit que… »).
-5. Sois bref et humain : 1 à 3 phrases, chaleureux, naturel. Pas de préambule, pas de guillemets.
+RÈGLES POUR TA RÉPONSE — IMPÉRATIF ABSOLU :
+1. Réponds AVANT TOUT à ce que la personne vient d'écrire, sur SON sujet. Ne parle pas de son profil, ne lui énumère pas ses traits (« tu as l'air calme… »), ne récite jamais ce que tu sais déjà.
+2. Adapte-toi à son registre. Si son message est une salutation ou une banalité (« salam », « ça va », « ok », « merci »), réponds simplement et chaleureusement, avec au plus une petite question légère — n'ouvre PAS de grand sujet, ne lance PAS d'interrogatoire.
+3. Ne commence PAS ta réponse en répétant ses mots. Réagis naturellement.
+4. Au plus UNE question, courte, qui prolonge NATURELLEMENT ce qu'elle vient de dire — jamais plaquée, jamais recopiée de ce prompt.
+5. Ne repose jamais une question déjà posée ; ne répète jamais une formule déjà employée dans l'historique.
+6. Bref et humain : 1 à 3 phrases. Pas de préambule, pas de guillemets.
 
-Réponds maintenant, en français, au DERNIER message de la personne, en respectant ces 5 règles. Écris uniquement ton message."""
+Écris uniquement ton message, en français."""
 
 
 EXTRACT_PROMPT = """Tu es un extracteur d'informations pour un profil de rencontre. À partir UNIQUEMENT du message du membre ci-dessous, renseigne les champs qu'il a EXPLICITEMENT écrits DANS CE MESSAGE.
@@ -129,9 +136,27 @@ Message : « Je m'appelle Sami, j'ai 28 ans et je vis à Lyon »  →  {"updates
 Message : « J'aimerais une femme proche de sa famille »  →  {"updates": {}, "asked_topic": null, "memory_notes": ["Attache de l'importance à la proximité familiale"], "preference_signals": [{"dimension": "valeurs", "cle": "famille", "orientation": "favorable", "score": 7, "indice": "proche de sa famille"}]}"""
 
 
+_TRIVIAL = {"salam", "salut", "bonjour", "bonsoir", "coucou", "hello", "hey",
+            "ok", "oui", "non", "merci", "ca", "va", "cava", "bien", "yo",
+            "wa", "alaykoum", "aleykoum", "assalamou", "slt", "cc", "dacc", "daccord"}
+
+
+def _is_trivial(message: str) -> bool:
+    """Message sans information à extraire (salutation, acquiescement) : on saute
+    l'appel d'extraction pour gagner du temps."""
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKD", message.lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    words = re.findall(r"[a-z0-9']{2,}", s)
+    if not words:
+        return True
+    return len(words) <= 4 and all(w in _TRIVIAL for w in words)
+
+
 def _extract(last_user_message: str) -> Extraction:
     """Extraction bornée au seul dernier message (empêche la recopie du profil)."""
-    if not last_user_message.strip():
+    if not last_user_message.strip() or _is_trivial(last_user_message):
         return Extraction()
     try:
         return llm.chat_structured(EXTRACT_PROMPT,
