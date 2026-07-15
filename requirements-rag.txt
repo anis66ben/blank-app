@@ -1,0 +1,11 @@
+# RAG SÉMANTIQUE (optionnel) — embeddings locaux via sentence-transformers.
+# Sans ces paquets, le RAG fonctionne quand même en mode LEXICAL (mots-clés).
+#
+# À installer sur la machine qui fait tourner le bot :
+#   pip install -r requirements-rag.txt
+#
+# ⚠️ Mémoire : sentence-transformers embarque PyTorch (~1-2 Go) et charge un
+# modèle (~470 Mo). Sur un Mac 8 Go où tourne déjà un LLM MLX, ça peut être
+# juste. Si la machine rame, restez en mode lexical (n'installez pas ceci) ou
+# choisissez un modèle plus léger via EMBED_MODEL (ex. all-MiniLM-L6-v2).
+sentence-transformers>=2.2

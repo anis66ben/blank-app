@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🌙 Admin — Plateforme de rencontre</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1c2733; --muted: #6b7a8c;
+    --accent: #0f766e; --accent-soft: #ccfbf1; --border: #e3e8ee;
+    --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { background: var(--card); border-bottom: 1px solid var(--border);
+           padding: 14px 24px; display: flex; align-items: center; gap: 16px;
+           flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  nav { display: flex; gap: 4px; margin-left: 24px; }
+  nav button { border: none; background: none; padding: 8px 14px; font-size: 14px;
+               cursor: pointer; border-radius: 8px; color: var(--muted); }
+  nav button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  main { max-width: 1200px; margin: 24px auto; padding: 0 24px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+           gap: 14px; margin-bottom: 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+          padding: 14px 16px; }
+  .card .label { font-size: 12px; color: var(--muted); }
+  .card .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+  .panel { background: var(--card); border: 1px solid var(--border);
+           border-radius: 12px; padding: 18px; margin-bottom: 20px; }
+  .panel h2 { margin: 0 0 12px; font-size: 15px; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+             gap: 10px; }
+  .filters label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 3px; }
+  input, select { width: 100%; padding: 7px 9px; border: 1px solid var(--border);
+                  border-radius: 8px; font-size: 13px; background: #fff; color: var(--text); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: var(--accent-soft); }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
+  .bar-row .name { width: 90px; color: var(--muted); }
+  .bar { height: 14px; background: var(--accent); border-radius: 4px; min-width: 2px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px;
+           font-weight: 600; }
+  .badge.mutual { background: #dcfce7; color: var(--ok); }
+  .badge.proposed { background: #fef3c7; color: var(--warn); }
+  .badge.refused { background: #fee2e2; color: var(--bad); }
+  .progress { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .progress > div { height: 100%; background: var(--accent); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 800px) {
+    .grid2 { grid-template-columns: 1fr; }
+    main { padding: 0 10px; margin-top: 12px; }
+    header { padding: 10px 12px; } header h1 { font-size: 15px; }
+    nav { margin-left: 0; } nav button { padding: 6px 10px; font-size: 13px; }
+    table { font-size: 12px; } th, td { padding: 6px; }
+  }
+  dl { margin: 0; } dt { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  dd { margin: 1px 0 0; font-size: 14px; }
+  .chat { max-height: 480px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 75%; padding: 8px 12px; border-radius: 12px; font-size: 13px;
+         white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: var(--accent-soft); }
+  .msg.assistant { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); }
+  .msg .time { font-size: 10px; color: var(--muted); margin-top: 3px; }
+  .muted { color: var(--muted); }
+  .hidden { display: none; }
+  button.primary { background: var(--accent); color: #fff; border: none; padding: 8px 16px;
+                   border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .rgpd { font-size: 12px; color: var(--warn); margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌙 Tableau de bord administrateur</h1>
+  <nav>
+    <button data-tab="stats" class="active">📊 Statistiques</button>
+    <button data-tab="users">👥 Utilisateurs</button>
+    <button data-tab="matches">💫 Matchs</button>
+    <button data-tab="convs">💬 Conversations</button>
+  </nav>
+</header>
+<main>
+
+<!-- ================= STATISTIQUES ================= -->
+<section id="tab-stats">
+  <div class="cards" id="stat-cards"></div>
+  <div class="grid2">
+    <div class="panel"><h2>Complétude des profils</h2><div id="chart-completeness"></div></div>
+    <div class="panel"><h2>Inscriptions par semaine</h2><div id="chart-signups"></div></div>
+  </div>
+</section>
+
+<!-- ================= UTILISATEURS ================= -->
+<section id="tab-users" class="hidden">
+  <div class="panel">
+    <h2>🔍 Recherche avancée</h2>
+    <div class="filters">
+      <div><label>Recherche (nom, pseudo, ID)</label><input id="f-search"></div>
+      <div><label>Sexe</label><select id="f-gender"><option value="">Tous</option>
+        <option value="homme">Homme</option><option value="femme">Femme</option></select></div>
+      <div><label>Situation</label><select id="f-marital"><option value="">Toutes</option>
+        <option value="celibataire">Célibataire</option><option value="divorce">Divorcé(e)</option>
+        <option value="veuf">Veuf/veuve</option></select></div>
+      <div><label>Statut</label><select id="f-status"><option value="">Tous</option>
+        <option value="actif">Actif</option><option value="inactif">Inactif</option></select></div>
+      <div><label>Ville</label><input id="f-city"></div>
+      <div><label>Département</label><input id="f-department"></div>
+      <div><label>Pays</label><input id="f-country"></div>
+      <div><label>Profession</label><input id="f-profession"></div>
+      <div><label>Âge min</label><input id="f-agemin" type="number" value="18"></div>
+      <div><label>Âge max</label><input id="f-agemax" type="number" value="99"></div>
+      <div><label>Complétude min (%)</label><input id="f-comp" type="number" value="0"></div>
+      <div style="display:flex;align-items:flex-end"><button class="primary" id="btn-filter">Filtrer</button></div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2 id="users-count"></h2>
+    <div style="overflow-x:auto"><table id="users-table">
+      <thead><tr><th>ID</th><th>Prénom</th><th>Sexe</th><th>Âge</th><th>Ville</th><th>Pays</th>
+      <th>Profession</th><th>Situation</th><th>Complétude</th><th>Inscription</th><th>Dernière activité</th></tr></thead>
+      <tbody></tbody></table></div>
+  </div>
+  <div class="panel hidden" id="user-detail-panel">
+    <h2 id="detail-title"></h2>
+    <div class="progress" style="margin-bottom:14px"><div id="detail-progress"></div></div>
+    <div class="grid2"><dl id="detail-left"></dl><dl id="detail-right"></dl></div>
+  </div>
+</section>
+
+<!-- ================= MATCHS ================= -->
+<section id="tab-matches" class="hidden">
+  <div class="panel">
+    <h2>💫 Matchs <select id="f-match-status" style="width:auto;margin-left:10px">
+      <option value="">Tous</option><option value="proposed">Proposés</option>
+      <option value="mutual">Acceptés (mutuels)</option><option value="refused">Refusés</option>
+    </select></h2>
+    <div style="overflow-x:auto"><table id="matches-table">
+      <thead><tr><th>ID</th><th>Homme</th><th>Femme</th><th>Score</th>
+      <th>Réponse (H)</th><th>Réponse (F)</th><th>Statut</th><th>Créé le</th></tr></thead>
+      <tbody></tbody></table></div>
+  </div>
+  <div class="panel hidden" id="match-detail-panel">
+    <h2>Décomposition du score</h2><div id="match-details"></div>
+  </div>
+</section>
+
+<!-- ================= CONVERSATIONS ================= -->
+<section id="tab-convs" class="hidden">
+  <div class="panel">
+    <p class="rgpd">⚠️ Accès réservé à la modération, dans le respect du RGPD :
+      consultez uniquement en cas de nécessité (signalement, sécurité).</p>
+    <label class="muted" style="font-size:12px">Utilisateur</label>
+    <select id="conv-user" style="max-width:340px"></select>
+    <p class="muted" id="conv-topics" style="font-size:12px"></p>
+  </div>
+  <div class="panel"><div class="chat" id="chat"></div></div>
+</section>
+
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const api = async (path) => {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+};
+const fmt = v => (v === null || v === undefined || v === "") ? "—" : v;
+const fdate = iso => iso ? new Date(iso).toLocaleDateString("fr-FR") : "—";
+const fdatetime = iso => iso ? new Date(iso).toLocaleString("fr-FR",
+  {dateStyle:"short", timeStyle:"short"}) : "—";
+const STATUS_FR = {proposed:"proposé", mutual:"mutuel 🎉", refused:"refusé", expired:"expiré"};
+const RESP_FR = {pending:"en attente", accepted:"accepté", refused:"refusé",
+                 postponed:"reporté", info:"infos demandées"};
+
+/* ---------- Onglets ---------- */
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
+  b.classList.add("active");
+  ["stats","users","matches","convs"].forEach(t =>
+    $("#tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
+});
+
+/* ---------- Statistiques ---------- */
+function barChart(el, data) {
+  const max = Math.max(...Object.values(data), 1);
+  el.innerHTML = Object.entries(data).map(([k, v]) =>
+    `<div class="bar-row"><span class="name">${k}</span>
+     <div class="bar" style="width:${v / max * 100}%"></div><span>${v}</span></div>`).join("");
+}
+async function loadStats() {
+  const s = await api("/api/stats");
+  const cards = [
+    ["Utilisateurs", s.total_users], ["Hommes / Femmes", `${s.men} / ${s.women}`],
+    ["Profils actifs", s.active], ["Incomplets (<50%)", s.incomplete],
+    ["Nouveaux (7 j)", s.new_7d], ["Matchs générés", s.matches_total],
+    ["Matchs mutuels", s.matches_mutual],
+    ["Taux d'acceptation", s.acceptance_rate === null ? "—" : s.acceptance_rate + "%"],
+  ];
+  $("#stat-cards").innerHTML = cards.map(([l, v]) =>
+    `<div class="card"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+  barChart($("#chart-completeness"), s.completeness_bins);
+  barChart($("#chart-signups"), s.signups_by_week);
+}
+
+/* ---------- Utilisateurs ---------- */
+async function loadUsers() {
+  const params = new URLSearchParams({
+    search: $("#f-search").value, gender: $("#f-gender").value,
+    marital_status: $("#f-marital").value, status: $("#f-status").value,
+    city: $("#f-city").value, department: $("#f-department").value,
+    country: $("#f-country").value, profession: $("#f-profession").value,
+    age_min: $("#f-agemin").value || 18, age_max: $("#f-agemax").value || 99,
+    completeness_min: $("#f-comp").value || 0,
+  });
+  const users = await api("/api/users?" + params);
+  $("#users-count").textContent = users.length + " profil(s) trouvé(s) — cliquez pour la fiche détaillée";
+  $("#users-table tbody").innerHTML = users.map(u => `
+    <tr class="clickable" onclick="showUser(${u.telegram_id})">
+      <td>${u.telegram_id}</td><td>${fmt(u.pseudo)}</td><td>${fmt(u.gender)}</td>
+      <td>${fmt(u.age)}</td><td>${fmt(u.city)}</td><td>${fmt(u.country)}</td>
+      <td>${fmt(u.profession)}</td><td>${fmt(u.marital_status)}</td>
+      <td><div class="progress" style="width:70px"><div style="width:${u.completeness}%"></div></div>
+          ${u.completeness}%</td>
+      <td>${fdate(u.created_at)}</td><td>${fdatetime(u.last_active_at)}</td></tr>`).join("");
+}
+async function showUser(id) {
+  const u = await api("/api/users/" + id);
+  $("#user-detail-panel").classList.remove("hidden");
+  $("#detail-title").textContent =
+    `${u.pseudo || "—"} — ID Telegram ${u.telegram_id} (@${u.username || "—"})`;
+  $("#detail-progress").style.width = u.completeness + "%";
+  const dl = (pairs) => pairs.map(([k, v]) => `<dt>${k}</dt><dd>${fmt(v)}</dd>`).join("");
+  $("#detail-left").innerHTML = dl([
+    ["Sexe / Âge", `${fmt(u.gender)} — ${fmt(u.age)} ans`],
+    ["Naissance", `${fdate(u.birth_date)} à ${fmt(u.birth_place)}`],
+    ["Localisation", `${fmt(u.city)} (${fmt(u.department)}, ${fmt(u.country)})`],
+    ["Profession / Études", `${fmt(u.profession)} — ${fmt(u.education)}`],
+    ["Situation", u.marital_status],
+    ["Inscription", fdate(u.created_at)],
+    ["Dernière activité", fdatetime(u.last_active_at)],
+    ["Indice de connaissance", u.completeness + " / 100"],
+  ]);
+  $("#detail-right").innerHTML = dl([
+    ["Projet", `mariage ${fmt(u.marriage_timeline)} — enfants : ` +
+      (u.wants_children === null ? "—" : u.wants_children ? "oui" : "non") +
+      ` (${fmt(u.children_count_desired)} souhaités)`],
+    ["Pratique religieuse", u.religious_practice],
+    ["Mosquée", u.mosque_attendance],
+    ["Apprentissage religieux", u.religious_education],
+    ["Personnalité", (u.personality_traits || []).join(", ")],
+    ["Centres d'intérêt", (u.interests || []).join(", ")],
+    ["Habitudes de vie", (u.lifestyle_facts || []).join(", ")],
+    ["Recherche un(e) conjoint(e)", u.sought ?
+      `${u.sought.age_min || "?"}-${u.sought.age_max || "?"} ans · ${fmt(u.sought.location)} · ` +
+      `pratique : ${fmt(u.sought.religious)} · enfants : ` +
+      (u.sought.wants_children === null ? "—" : u.sought.wants_children ? "oui" : "non") +
+      ` · qualités : ${(u.sought.qualities || []).join(", ") || "—"}` : "—"],
+    ["Notes mémorisées par le bot", (u.memory_notes || []).join(" · ")],
+    ["Sujets déjà abordés", (u.asked_topics || []).join(", ")],
+    ["Préférences apprises (réactions)", (u.preferences || []).map(p =>
+      `${p.key} — ${p.orientation} (${p.confidence}%, ${p.occurrences} obs.)`
+    ).join(" · ")],
+  ]);
+  $("#user-detail-panel").scrollIntoView({behavior: "smooth"});
+}
+
+/* ---------- Matchs ---------- */
+let matchesCache = [];
+async function loadMatches() {
+  matchesCache = await api("/api/matches?status=" + $("#f-match-status").value);
+  $("#matches-table tbody").innerHTML = matchesCache.map(m => `
+    <tr class="clickable" onclick="showMatch(${m.id})">
+      <td>${m.id}</td><td>${fmt(m.user_m)}</td><td>${fmt(m.user_f)}</td>
+      <td><b>${m.score}</b></td>
+      <td>${RESP_FR[m.response_m] || m.response_m}</td>
+      <td>${RESP_FR[m.response_f] || m.response_f}</td>
+      <td><span class="badge ${m.status}">${STATUS_FR[m.status] || m.status}</span></td>
+      <td>${fdate(m.created_at)}</td></tr>`).join("");
+}
+function showMatch(id) {
+  const m = matchesCache.find(x => x.id === id);
+  if (!m || !m.details) return;
+  $("#match-detail-panel").classList.remove("hidden");
+  barChart($("#match-details"), m.details);
+}
+
+/* ---------- Conversations ---------- */
+async function loadConvUsers() {
+  const users = await api("/api/users");
+  $("#conv-user").innerHTML = '<option value="">— choisir —</option>' +
+    users.map(u => `<option value="${u.telegram_id}">${u.pseudo || "—"} (ID ${u.telegram_id})</option>`).join("");
+}
+$("#conv-user").onchange = async () => {
+  const id = $("#conv-user").value;
+  if (!id) return;
+  const [msgs, detail] = await Promise.all([
+    api(`/api/users/${id}/messages`), api(`/api/users/${id}`)]);
+  $("#conv-topics").textContent = detail.asked_topics.length
+    ? "Sujets déjà abordés par le bot : " + detail.asked_topics.join(", ") : "";
+  $("#chat").innerHTML = msgs.length ? msgs.map(m => `
+    <div class="msg ${m.role}">${m.content.replace(/</g, "&lt;")}
+      <div class="time">${fdatetime(m.created_at)}</div></div>`).join("")
+    : '<p class="muted">Aucun message échangé.</p>';
+};
+
+/* ---------- Init ---------- */
+$("#btn-filter").onclick = loadUsers;
+$("#f-match-status").onchange = loadMatches;
+loadStats(); loadUsers(); loadMatches(); loadConvUsers();
+</script>
+</body>
+</html>

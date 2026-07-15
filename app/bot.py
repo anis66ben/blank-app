@@ -1,0 +1,631 @@
+"""Bot Telegram : conversations privées, suggestions de match et animation
+communautaire.
+
+Lancement :  python -m app.bot
+"""
+from __future__ import annotations
+
+import asyncio
+import datetime as dt
+import logging
+import random
+
+from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, Update)
+from telegram.constants import ChatAction, ParseMode
+from telegram.error import TelegramError
+from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
+                          ContextTypes, MessageHandler, filters)
+
+from . import admin_commands, ai, config, matching, privacy
+from .db import (AskedQuestion, CommunityPost, Match, Message, Profile, Report,
+                 User, db_session, get_or_create_user, utcnow)
+from .profile_schema import FIELD_LABELS
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(name)s %(levelname)s %(message)s")
+# Masque les logs de polling Telegram (une ligne HTTP toutes les quelques
+# secondes), pour ne garder que l'essentiel : démarrage, générations, erreurs.
+for _noisy in ("httpx", "httpcore", "telegram.ext.Updater", "telegram.request"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+log = logging.getLogger("bot")
+
+WELCOME = (
+    "Assalamou alaykoum et bienvenue ! 🌙\n\n"
+    "Je suis l'assistant de cette communauté de rencontre entre musulmans et "
+    "musulmanes en vue du mariage. Nous allons faire connaissance petit à petit, "
+    "au fil de conversations simples — pas de long questionnaire à remplir.\n\n"
+    "Plus j'apprends à te connaître, plus je pourrai te proposer des profils "
+    "réellement compatibles. Tu peux consulter ton profil à tout moment avec /profil.\n\n"
+    "Pour commencer : comment souhaites-tu que je t'appelle ?"
+)
+
+AI_ERROR_REPLY = ("Désolé, j'ai un petit souci technique. "
+                  "Réessaie dans quelques instants, barakAllahou fik.")
+
+
+# ---------------------------------------------------------------------------
+# Commandes
+# ---------------------------------------------------------------------------
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    tg_user = update.effective_user
+    with db_session() as session:
+        user = get_or_create_user(session, tg_user.id, tg_user.username, tg_user.full_name)
+        needs_consent = config.CONSENT_REQUIRED and user.consented_at is None
+    if needs_consent:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+            "✅ J'accepte", callback_data="consent:accept")]])
+        await update.message.reply_text(privacy.CONSENT_TEXT,
+                                        parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+        return
+    await _send_welcome(update.effective_chat.id, tg_user.id, context)
+
+
+async def _send_welcome(chat_id: int, user_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with db_session() as session:
+        session.add(Message(user_id=user_id, role="assistant", content=WELCOME))
+        if not ai.ai_enabled():  # mode guidé : mémorise la question du prénom
+            already = (session.query(AskedQuestion)
+                       .filter(AskedQuestion.user_id == user_id,
+                               AskedQuestion.topic == "pseudo").count())
+            if not already:
+                session.add(AskedQuestion(user_id=user_id, topic="pseudo"))
+    await context.bot.send_message(chat_id=chat_id, text=WELCOME)
+
+
+async def on_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    with db_session() as session:
+        user = get_or_create_user(session, query.from_user.id,
+                                  query.from_user.username, query.from_user.full_name)
+        user.consented_at = utcnow()
+    await query.edit_message_reply_markup(None)
+    await query.message.reply_text("Merci ! 🌙 C'est noté.")
+    await _send_welcome(query.message.chat_id, query.from_user.id, context)
+
+
+async def cmd_conditions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(privacy.CONSENT_TEXT, parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_signaler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    reason = " ".join(context.args).strip() if context.args else ""
+    if not reason:
+        await update.message.reply_text(
+            "Pour signaler un problème ou un comportement déplacé, écris :\n"
+            "/signaler suivi de ta description.\n"
+            "Exemple : /signaler propos déplacés de la personne mise en relation.")
+        return
+    reporter_id = update.effective_user.id
+
+    def _save():
+        with db_session() as session:
+            get_or_create_user(session, reporter_id, update.effective_user.username,
+                               update.effective_user.full_name)
+            session.add(Report(reporter_id=reporter_id, reported_id=None, reason=reason[:1000]))
+    await asyncio.to_thread(_save)
+    await update.message.reply_text(
+        "🚩 Merci, ton signalement a bien été transmis à la modération. "
+        "Nous le traiterons avec attention.")
+    await _notify_admins(context,
+                         f"🚩 Signalement de {reporter_id} : {reason[:500]}\n"
+                         f"À examiner avec /signalements.")
+
+
+async def cmd_mesdonnees(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    def _export():
+        with db_session() as session:
+            return privacy.export_data(session, update.effective_user.id)
+    data = await asyncio.to_thread(_export)
+    await update.message.reply_text(
+        "📄 *Voici les données enregistrées à ton sujet :*\n\n```\n" + data + "\n```",
+        parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_supprimer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🗑 Oui, tout effacer", callback_data="gdpr:delete"),
+        InlineKeyboardButton("Annuler", callback_data="gdpr:cancel")]])
+    await update.message.reply_text(
+        "⚠️ Veux-tu vraiment *effacer définitivement* ton profil, tes préférences "
+        "et tout l'historique de nos échanges ? Cette action est irréversible.",
+        parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+
+
+async def on_gdpr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":")[1]
+    await query.edit_message_reply_markup(None)
+    if action == "cancel":
+        await query.message.reply_text("Annulé, tes données sont conservées.")
+        return
+
+    def _delete():
+        with db_session() as session:
+            return privacy.delete_data(session, query.from_user.id)
+    await asyncio.to_thread(_delete)
+    await query.message.reply_text(
+        "✅ C'est fait : toutes tes données ont été effacées. "
+        "Tu peux repartir de zéro à tout moment avec /start. Prends soin de toi. 🤲")
+
+
+async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with db_session() as session:
+        user = get_or_create_user(session, update.effective_user.id)
+        p = user.profile
+        lines = [f"📋 *Ton profil* — indice de connaissance : *{p.completeness}/100*\n"]
+        rows = [
+            ("Prénom/pseudo", p.pseudo), ("Sexe", p.gender), ("Âge", p.age),
+            ("Ville", p.city), ("Pays", p.country), ("Profession", p.profession),
+            ("Études", p.education), ("Situation", p.marital_status),
+            ("Délai mariage", p.marriage_timeline),
+            ("Souhaite des enfants", {True: "oui", False: "non"}.get(p.wants_children)),
+            ("Pratique religieuse", p.religious_practice),
+            ("Personnalité", ", ".join(p.personality_traits or []) or None),
+            ("Centres d'intérêt", ", ".join(p.interests or []) or None),
+        ]
+        for label, value in rows:
+            lines.append(f"• {label} : {value if value not in (None, '') else '_à découvrir_'}")
+        lines.append("\nContinue nos conversations pour enrichir ton profil ✨")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_aide(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "🤝 *Comment ça marche ?*\n\n"
+        "• Discute simplement avec moi : j'apprends à te connaître au fil des échanges.\n"
+        "• Quand un profil compatible est identifié, je te préviens et tu choisis : "
+        "en savoir plus, accepter, refuser ou reporter.\n"
+        "• /profil — voir ton profil et son niveau de complétude\n"
+        "• /pause — suspendre les suggestions\n"
+        "• /reprendre — réactiver les suggestions\n"
+        "• /mesdonnees — voir les données enregistrées sur toi\n"
+        "• /supprimer — effacer définitivement tes données\n"
+        "• /conditions — rappel sur la protection des données",
+        parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with db_session() as session:
+        user = get_or_create_user(session, update.effective_user.id)
+        user.is_active = False
+    await update.message.reply_text("Suggestions suspendues. Reviens quand tu veux avec /reprendre 🤲")
+
+
+async def cmd_reprendre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with db_session() as session:
+        user = get_or_create_user(session, update.effective_user.id)
+        user.is_active = True
+    await update.message.reply_text("Heureux de te revoir ! Les suggestions sont réactivées ✨")
+
+
+# ---------------------------------------------------------------------------
+# Conversation libre -> IA
+# ---------------------------------------------------------------------------
+async def _keep_typing(bot, chat_id: int) -> None:
+    """Rafraîchit l'indicateur « en train d'écrire » (il expire au bout de ~5 s),
+    pour que le membre voie que le bot travaille pendant une génération longue."""
+    try:
+        while True:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
+
+
+async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_chat.type != "private":
+        return  # l'IA ne répond qu'en privé
+    tg_user = update.effective_user
+    text = update.message.text
+
+    # Garde-fous RGPD (consentement) + coût (plafond quotidien), en une requête.
+    def _gate() -> str | None:
+        with db_session() as session:
+            user = get_or_create_user(session, tg_user.id, tg_user.username, tg_user.full_name)
+            if config.CONSENT_REQUIRED and user.consented_at is None:
+                return "consent"
+            if privacy.count_messages_today(session, user.telegram_id) >= config.MAX_MESSAGES_PER_DAY:
+                return "limit"
+        return None
+
+    gate = await asyncio.to_thread(_gate)
+    if gate == "consent":
+        await update.message.reply_text(
+            "Avant de commencer, merci de valider les conditions avec /start 🙏")
+        return
+    if gate == "limit":
+        await update.message.reply_text(
+            "Tu as atteint la limite d'échanges pour aujourd'hui 🌙 "
+            "Reviens demain, in shâ Allah — je serai là.")
+        return
+
+    def _turn() -> str:
+        with db_session() as session:
+            user = get_or_create_user(session, tg_user.id, tg_user.username, tg_user.full_name)
+            return ai.handle_user_message(session, user, text)
+
+    # Indicateur « écrit… » maintenu pendant toute la génération (Qwen3 local
+    # peut prendre plusieurs secondes, surtout au premier message).
+    typing = asyncio.create_task(_keep_typing(context.bot, update.effective_chat.id))
+    try:
+        reply = await asyncio.to_thread(_turn)
+    except Exception:
+        log.exception("Échec du tour de conversation pour %s", tg_user.id)
+        reply = AI_ERROR_REPLY
+    finally:
+        typing.cancel()
+    await update.message.reply_text(reply)
+
+
+# ---------------------------------------------------------------------------
+# Suggestions de match
+# ---------------------------------------------------------------------------
+def _match_card(profile: Profile, score: float, narrative: str | None = None) -> str:
+    """Carte de suggestion. Avec IA : présentation narrative (charte §6) ;
+    sinon : fiche factuelle."""
+    if narrative:
+        body = (f"{narrative}\n\n"
+                f"({profile.age or '—'} ans, {profile.city or '—'}, "
+                f"{profile.marital_status or '—'})")
+    else:
+        interests = ", ".join((profile.interests or [])[:4])
+        traits = ", ".join((profile.personality_traits or [])[:4])
+        body = (f"• Âge : {profile.age or '—'} ans\n"
+                f"• Ville : {profile.city or '—'} ({profile.country or '—'})\n"
+                f"• Profession : {profile.profession or '—'}\n"
+                f"• Situation : {profile.marital_status or '—'}\n"
+                f"• Personnalité : {traits or '—'}\n"
+                f"• Centres d'intérêt : {interests or '—'}")
+    return (
+        "💫 *Nous avons identifié un profil susceptible de correspondre à tes attentes.*\n\n"
+        f"{body}\n\n"
+        f"Compatibilité estimée : *{round(score)}%*\n"
+        "Que souhaites-tu faire ?"
+    )
+
+
+def _match_keyboard(match_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("ℹ️ Plus d'infos", callback_data=f"match:{match_id}:info"),
+         InlineKeyboardButton("✅ Accepter", callback_data=f"match:{match_id}:accepted")],
+        [InlineKeyboardButton("❌ Refuser", callback_data=f"match:{match_id}:refused"),
+         InlineKeyboardButton("🕐 Plus tard", callback_data=f"match:{match_id}:postponed")],
+        [InlineKeyboardButton("🚩 Signaler ce profil", callback_data=f"match:{match_id}:report")],
+    ])
+
+
+async def _notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    for admin_id in config.ADMIN_TELEGRAM_IDS:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text)
+        except TelegramError:
+            pass
+
+
+async def job_matching(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job périodique : calcule les nouveaux matchs et envoie les suggestions."""
+    def _compute():
+        with db_session() as session:
+            created = matching.find_new_matches(session)
+            payload = []
+            for m in created:
+                pm = session.get(Profile, m.user_m_id)
+                pf = session.get(Profile, m.user_f_id)
+                payload.append((m.id, m.user_m_id, m.user_f_id, m.score, pm, pf))
+            return payload
+
+    try:
+        new_matches = await asyncio.to_thread(_compute)
+    except Exception:
+        log.exception("Échec du calcul des matchs")
+        return
+
+    for match_id, m_id, f_id, score, pm, pf in new_matches:
+        for recipient, other in [(m_id, pf), (f_id, pm)]:
+            narrative = await asyncio.to_thread(ai.generate_profile_presentation, other)
+            try:
+                await context.bot.send_message(
+                    chat_id=recipient, text=_match_card(other, score, narrative),
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=_match_keyboard(match_id))
+            except TelegramError:
+                log.warning("Impossible d'envoyer la suggestion %s à %s", match_id, recipient)
+    if new_matches:
+        log.info("%d nouvelle(s) suggestion(s) envoyée(s)", len(new_matches))
+
+
+async def on_match_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    try:
+        _, match_id_s, response = query.data.split(":")
+        match_id = int(match_id_s)
+    except ValueError:
+        return
+    responder_id = query.from_user.id
+
+    def _apply():
+        with db_session() as session:
+            match = session.get(Match, match_id)
+            if match is None:
+                return None, None, None
+            if response != "info":
+                matching.register_response(session, match, responder_id, response)
+            other_id = match.user_f_id if responder_id == match.user_m_id else match.user_m_id
+            other_profile = session.get(Profile, other_id)
+            other_user = session.get(User, other_id)
+            return match, other_profile, other_user
+
+    match, other_profile, other_user = await asyncio.to_thread(_apply)
+    if match is None:
+        await query.edit_message_reply_markup(None)
+        return
+
+    if response == "report":
+        def _report():
+            with db_session() as session:
+                m = session.get(Match, match_id)
+                other = m.user_f_id if responder_id == m.user_m_id else m.user_m_id
+                session.add(Report(reporter_id=responder_id, reported_id=other,
+                                   reason="Signalement via une suggestion de profil"))
+                matching.register_response(session, m, responder_id, "refused")
+                return other
+        reported = await asyncio.to_thread(_report)
+        await query.edit_message_reply_markup(None)
+        await query.message.reply_text(
+            "🚩 Merci, ce profil a été signalé à la modération et ne te sera plus "
+            "proposé. Nous prenons ces signalements au sérieux.")
+        await _notify_admins(context,
+                             f"🚩 Signalement : {responder_id} a signalé {reported} "
+                             f"(via suggestion). À examiner avec /signalements.")
+        return
+
+    if response == "info":
+        p = other_profile
+        await query.message.reply_text(
+            "ℹ️ *En savoir plus*\n\n"
+            f"• Études : {p.education or '—'}\n"
+            f"• Délai souhaité pour le mariage : {p.marriage_timeline or '—'}\n"
+            f"• Souhaite des enfants : "
+            f"{ {True: 'oui', False: 'non'}.get(p.wants_children, '—') }\n"
+            f"• Pratique religieuse : {p.religious_practice or '—'}\n"
+            f"• Habitudes de vie : {', '.join((p.lifestyle_facts or [])[:4]) or '—'}",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+
+    confirmations = {
+        "accepted": "✅ C'est noté ! Si l'autre personne accepte aussi, je vous mets en relation, in shâ Allah.",
+        "refused": "❌ C'est noté, merci pour ta franchise. Je continue mes recherches pour toi.",
+        "postponed": "🕐 Très bien, je te reproposerai ce profil plus tard.",
+    }
+    # Recueil du ressenti (charte §2 et §7) : la réaction au profil est la
+    # source d'information la plus précieuse pour affiner les suggestions.
+    followups = {
+        "accepted": "Qu'est-ce qui t'a le plus parlé dans ce profil ?",
+        "refused": "Peux-tu me dire ce qui ne correspondait pas ? Cela m'aidera "
+                   "à te proposer des profils plus justes.",
+        "postponed": "Qu'est-ce qui te fait hésiter sur ce profil ? Ton ressenti "
+                     "m'aide à mieux comprendre ce qui compte pour toi.",
+    }
+    await query.edit_message_reply_markup(None)
+    reply = confirmations.get(response, "C'est noté.")
+    if ai.ai_enabled() and response in followups:
+        reply += "\n\n" + followups[response]
+
+        def _log(uid=responder_id, text=reply):
+            with db_session() as session:
+                session.add(Message(user_id=uid, role="assistant", content=text))
+        await asyncio.to_thread(_log)
+    await query.message.reply_text(reply)
+
+    # Mise en relation mutuelle
+    if match.status == "mutual":
+        for uid, other in [(match.user_m_id, match.user_f_id), (match.user_f_id, match.user_m_id)]:
+            def _contact(oid=other):
+                with db_session() as session:
+                    u = session.get(User, oid)
+                    p = session.get(Profile, oid)
+                    handle = f"@{u.username}" if u and u.username else "(pseudo Telegram non renseigné)"
+                    return p.pseudo or "ce membre", handle
+            pseudo, handle = await asyncio.to_thread(_contact)
+            try:
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text=f"🎉 *Excellente nouvelle !* Vous avez tous les deux accepté la mise en relation.\n\n"
+                         f"Tu peux maintenant contacter {pseudo} : {handle}\n\n"
+                         "Nous vous souhaitons un échange sincère et respectueux. "
+                         "Qu'Allah vous facilite. 🤲",
+                    parse_mode=ParseMode.MARKDOWN)
+            except TelegramError:
+                log.warning("Notification de match mutuel impossible pour %s", uid)
+
+
+# ---------------------------------------------------------------------------
+# Relance : enrichissement progressif des profils incomplets
+# ---------------------------------------------------------------------------
+RELAUNCH_AFTER_HOURS = 48
+
+async def job_enrichment(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Relance en douceur les membres inactifs dont le profil est incomplet.
+    Le bot choisit sa question via l'IA, en priorisant les profils les moins connus."""
+    def _candidates():
+        cutoff = utcnow() - dt.timedelta(hours=RELAUNCH_AFTER_HOURS)
+        with db_session() as session:
+            users = (session.query(User)
+                     .join(Profile)
+                     .filter(User.is_active.is_(True),
+                             User.last_active_at < cutoff,
+                             Profile.completeness < 80)
+                     .order_by(Profile.completeness.asc())
+                     .limit(10).all())
+            return [u.telegram_id for u in users]
+
+    try:
+        ids = await asyncio.to_thread(_candidates)
+    except Exception:
+        log.exception("Échec de la sélection des profils à relancer")
+        return
+
+    for uid in ids:
+        def _turn(uid=uid):
+            with db_session() as session:
+                user = session.get(User, uid)
+                return ai.handle_user_message(
+                    session, user,
+                    "[relance automatique : reprends contact chaleureusement et pose une "
+                    "nouvelle question pour mieux me connaître]")
+        try:
+            reply = await asyncio.to_thread(_turn)
+            await context.bot.send_message(chat_id=uid, text=reply)
+        except Exception:
+            log.warning("Relance impossible pour %s", uid)
+
+
+# ---------------------------------------------------------------------------
+# Animation communautaire (si COMMUNITY_CHAT_ID est configuré)
+# ---------------------------------------------------------------------------
+POLL_BANK = [
+    ("Quel critère compte le plus pour vous dans le choix d'un(e) époux(se) ?",
+     ["La pratique religieuse", "Le caractère", "La situation stable", "La famille"]),
+    ("Où rêveriez-vous de vivre après le mariage ?",
+     ["Dans mon pays actuel", "Dans un pays musulman", "Peu importe, avec la bonne personne", "Près de ma famille"]),
+    ("Le meilleur moment pour se marier, c'est…",
+     ["Dès que possible", "Après les études", "Une fois stable financièrement", "Quand on trouve la bonne personne"]),
+]
+
+
+async def job_community(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Publie chaque jour un contenu différent dans le groupe communautaire."""
+    if not config.COMMUNITY_CHAT_ID:
+        return
+    chat_id = int(config.COMMUNITY_CHAT_ID)
+    weekday = dt.date.today().weekday()
+    # Rotation hebdomadaire : lun=question, mar=sondage, mer=quiz, jeu=stats,
+    # ven=profil de la semaine, sam=rappel des règles, dim=question
+    kinds = ["question", "sondage", "quiz", "stats", "profil_semaine", "regles", "question"]
+    kind = kinds[weekday]
+
+    try:
+        if kind == "sondage":
+            question, options = random.choice(POLL_BANK)
+            await context.bot.send_poll(chat_id=chat_id, question=question,
+                                        options=options, is_anonymous=True)
+            content = question
+        elif kind == "stats":
+            content = await asyncio.to_thread(_stats_text)
+            await context.bot.send_message(chat_id=chat_id, text=content)
+        elif kind == "profil_semaine":
+            content = await asyncio.to_thread(_profile_of_week_text)
+            if not content:
+                return
+            await context.bot.send_message(chat_id=chat_id, text=content,
+                                           parse_mode=ParseMode.MARKDOWN)
+        elif kind == "regles":
+            content = await asyncio.to_thread(ai.generate_community_text, "rappel_regles")
+            await context.bot.send_message(chat_id=chat_id, text="📜 Petit rappel :\n\n" + content)
+        else:  # question / quiz générés par l'IA
+            ai_kind = "quiz" if kind == "quiz" else "question"
+            content = await asyncio.to_thread(ai.generate_community_text, ai_kind)
+            prefix = "🧠 Quiz du jour !\n\n" if ai_kind == "quiz" else "💭 Question du jour :\n\n"
+            await context.bot.send_message(chat_id=chat_id, text=prefix + content)
+
+        def _log_post():
+            with db_session() as session:
+                session.add(CommunityPost(kind=kind, content=content))
+        await asyncio.to_thread(_log_post)
+    except Exception:
+        log.exception("Échec de la publication communautaire (%s)", kind)
+
+
+def _stats_text() -> str:
+    with db_session() as session:
+        week_ago = utcnow() - dt.timedelta(days=7)
+        total = session.query(User).count()
+        new = session.query(User).filter(User.created_at >= week_ago).count()
+        matches = session.query(Match).filter(Match.created_at >= week_ago).count()
+        mutual = session.query(Match).filter(Match.status == "mutual",
+                                             Match.updated_at >= week_ago).count()
+    return ("📊 Cette semaine dans la communauté :\n"
+            f"• {new} nouveau(x) membre(s) — {total} au total\n"
+            f"• {matches} nouvelle(s) mise(s) en relation proposée(s)\n"
+            f"• {mutual} match(s) mutuel(s) 🎉\n\n"
+            "Qu'Allah facilite à chacun d'entre vous !")
+
+
+def _profile_of_week_text() -> str | None:
+    """Portrait anonymisé d'un membre au profil bien rempli."""
+    with db_session() as session:
+        p = (session.query(Profile).join(User)
+             .filter(User.is_active.is_(True), Profile.completeness >= 50)
+             .order_by(Profile.updated_at.desc()).first())
+        if p is None:
+            return None
+        genre = "Frère" if p.gender == "homme" else "Sœur"
+        return (f"🌟 *Profil de la semaine* (anonyme)\n\n"
+                f"{genre}, {p.age or '—'} ans, vit en {p.country or '—'}.\n"
+                f"Profession : {p.profession or '—'}.\n"
+                f"Personnalité : {', '.join((p.personality_traits or [])[:3]) or '—'}.\n"
+                f"Aime : {', '.join((p.interests or [])[:3]) or '—'}.\n\n"
+                "Intéressé(e) ? Parle-m'en en message privé 😉")
+
+
+# ---------------------------------------------------------------------------
+def build_application() -> Application:
+    if not config.TELEGRAM_BOT_TOKEN:
+        raise SystemExit("TELEGRAM_BOT_TOKEN manquant : copiez .env.example vers .env "
+                         "et renseignez le jeton du bot.")
+    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("profil", cmd_profil))
+    app.add_handler(CommandHandler("aide", cmd_aide))
+    app.add_handler(CommandHandler("help", cmd_aide))
+    app.add_handler(CommandHandler("pause", cmd_pause))
+    app.add_handler(CommandHandler("reprendre", cmd_reprendre))
+    app.add_handler(CommandHandler("conditions", cmd_conditions))
+    app.add_handler(CommandHandler("mesdonnees", cmd_mesdonnees))
+    app.add_handler(CommandHandler("supprimer", cmd_supprimer))
+    app.add_handler(CommandHandler("signaler", cmd_signaler))
+    app.add_handler(CallbackQueryHandler(on_consent, pattern=r"^consent:"))
+    app.add_handler(CallbackQueryHandler(on_gdpr_button, pattern=r"^gdpr:"))
+    app.add_handler(CallbackQueryHandler(on_match_button, pattern=r"^match:"))
+    admin_commands.register(app)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+
+    jq = app.job_queue
+    jq.run_repeating(job_matching, interval=dt.timedelta(hours=6), first=60)
+    jq.run_repeating(job_enrichment, interval=dt.timedelta(hours=24), first=120)
+    jq.run_daily(job_community, time=dt.time(hour=18, minute=0))
+    return app
+
+
+def _preload_model() -> None:
+    """Précharge le modèle MLX en arrière-plan pour que le premier membre ne
+    subisse pas le temps de chargement (plusieurs secondes)."""
+    from . import llm
+    if llm.provider() != "mlx":
+        return
+    import threading
+
+    from . import mlx_backend
+
+    def _load():
+        try:
+            mlx_backend.ensure_loaded()
+        except Exception:
+            log.warning("Préchargement MLX impossible (le modèle se chargera au 1er message)")
+    threading.Thread(target=_load, daemon=True).start()
+    log.info("Préchargement du modèle MLX en arrière-plan…")
+
+
+def main() -> None:
+    app = build_application()
+    _preload_model()
+    log.info("Bot démarré — en attente de messages…")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()

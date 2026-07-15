@@ -1,0 +1,15 @@
+# Dépendances pour le moteur LLM local MLX (macOS Apple Silicon uniquement).
+# À installer EN PLUS de requirements.txt, sur le Mac qui fait tourner le bot.
+#
+# ATTENTION : mlx-lm 0.31.3 déclare "transformers>=5.0" mais son code plante à
+# l'import avec transformers 5.0 (bug amont : AutoTokenizer.register). On fige
+# donc une version 4.5x qui fonctionne réellement ET supporte Qwen3.
+#
+# Installation (deux commandes, dans cet ordre) :
+#   pip install -r requirements-mlx.txt
+#   pip install "transformers>=4.51,<5.0"        # force la version compatible
+#
+# Le second install affiche un avertissement pip inoffensif ("dependency
+# resolver...") : c'est normal, mlx-lm fonctionne bien ainsi.
+mlx-lm>=0.31.3
+transformers>=4.51,<5.0
