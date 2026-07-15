@@ -29,6 +29,7 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64))
     display_name: Mapped[str | None] = mapped_column(String(128))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    consented_at: Mapped[dt.datetime | None] = mapped_column(DateTime)  # RGPD
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
     last_active_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -189,11 +190,33 @@ def get_engine():
                                 if config.DATABASE_URL.startswith("sqlite") else {})
         if config.DATABASE_URL.startswith("sqlite"):
             @event.listens_for(_engine, "connect")
-            def _fk_on(dbapi_con, _):
-                dbapi_con.execute("PRAGMA foreign_keys=ON")
+            def _sqlite_pragmas(dbapi_con, _):
+                cur = dbapi_con.cursor()
+                cur.execute("PRAGMA foreign_keys=ON")
+                cur.execute("PRAGMA journal_mode=WAL")     # bot + dashboard en parallèle
+                cur.execute("PRAGMA busy_timeout=5000")    # attend au lieu de "database is locked"
+                cur.close()
         Base.metadata.create_all(_engine)
+        _ensure_columns(_engine)
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
+
+
+def _ensure_columns(engine) -> None:
+    """Migration légère : ajoute les colonnes manquantes sur une base existante
+    (SQLite/PostgreSQL supportent ADD COLUMN). Évite les incohérences quand le
+    schéma évolue, en attendant un vrai outil de migration (Alembic)."""
+    from sqlalchemy import inspect, text
+    wanted = {"users": {"consented_at": "DATETIME"}}
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table, cols in wanted.items():
+            if not insp.has_table(table):
+                continue
+            existing = {c["name"] for c in insp.get_columns(table)}
+            for col, coltype in cols.items():
+                if col not in existing:
+                    conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {col} {coltype}'))
 
 
 @contextmanager

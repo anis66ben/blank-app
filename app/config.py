@@ -75,3 +75,9 @@ LOCAL_HISTORY_WINDOW = int(os.getenv("LOCAL_HISTORY_WINDOW", "14"))
 # Journal des conversations (pour étudier le comportement du modèle).
 CONVERSATION_LOG = os.getenv("CONVERSATION_LOG", "true").strip().lower() == "true"
 CONV_LOG_PATH = os.getenv("CONV_LOG_PATH", str(BASE_DIR / "data" / "conversation_log.jsonl"))
+
+# RGPD : exiger le consentement au /start avant toute conversation.
+CONSENT_REQUIRED = os.getenv("CONSENT_REQUIRED", "true").strip().lower() == "true"
+
+# Plafond d'appels IA par membre et par jour (maîtrise des coûts + anti-flood).
+MAX_MESSAGES_PER_DAY = int(os.getenv("MAX_MESSAGES_PER_DAY", "40"))

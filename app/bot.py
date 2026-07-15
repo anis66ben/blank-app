@@ -16,9 +16,9 @@ from telegram.error import TelegramError
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
                           ContextTypes, MessageHandler, filters)
 
-from . import admin_commands, ai, config, matching
-from .db import (CommunityPost, Match, Message, Profile, User, db_session,
-                 get_or_create_user, utcnow)
+from . import admin_commands, ai, config, matching, privacy
+from .db import (AskedQuestion, CommunityPost, Match, Message, Profile, User,
+                 db_session, get_or_create_user, utcnow)
 from .profile_schema import FIELD_LABELS
 
 logging.basicConfig(level=logging.INFO,
@@ -50,17 +50,80 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tg_user = update.effective_user
     with db_session() as session:
         user = get_or_create_user(session, tg_user.id, tg_user.username, tg_user.full_name)
-        session.add(Message(user_id=user.telegram_id, role="assistant", content=WELCOME))
-        # Le message d'accueil demande le prénom : en mode guidé (sans API),
-        # on le mémorise pour que la première réponse soit comprise comme tel.
-        if not ai.ai_enabled():
-            from .db import AskedQuestion
+        needs_consent = config.CONSENT_REQUIRED and user.consented_at is None
+    if needs_consent:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+            "✅ J'accepte", callback_data="consent:accept")]])
+        await update.message.reply_text(privacy.CONSENT_TEXT,
+                                        parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+        return
+    await _send_welcome(update.effective_chat.id, tg_user.id, context)
+
+
+async def _send_welcome(chat_id: int, user_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with db_session() as session:
+        session.add(Message(user_id=user_id, role="assistant", content=WELCOME))
+        if not ai.ai_enabled():  # mode guidé : mémorise la question du prénom
             already = (session.query(AskedQuestion)
-                       .filter(AskedQuestion.user_id == user.telegram_id,
+                       .filter(AskedQuestion.user_id == user_id,
                                AskedQuestion.topic == "pseudo").count())
             if not already:
-                session.add(AskedQuestion(user_id=user.telegram_id, topic="pseudo"))
-    await update.message.reply_text(WELCOME)
+                session.add(AskedQuestion(user_id=user_id, topic="pseudo"))
+    await context.bot.send_message(chat_id=chat_id, text=WELCOME)
+
+
+async def on_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    with db_session() as session:
+        user = get_or_create_user(session, query.from_user.id,
+                                  query.from_user.username, query.from_user.full_name)
+        user.consented_at = utcnow()
+    await query.edit_message_reply_markup(None)
+    await query.message.reply_text("Merci ! 🌙 C'est noté.")
+    await _send_welcome(query.message.chat_id, query.from_user.id, context)
+
+
+async def cmd_conditions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(privacy.CONSENT_TEXT, parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_mesdonnees(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    def _export():
+        with db_session() as session:
+            return privacy.export_data(session, update.effective_user.id)
+    data = await asyncio.to_thread(_export)
+    await update.message.reply_text(
+        "📄 *Voici les données enregistrées à ton sujet :*\n\n```\n" + data + "\n```",
+        parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_supprimer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🗑 Oui, tout effacer", callback_data="gdpr:delete"),
+        InlineKeyboardButton("Annuler", callback_data="gdpr:cancel")]])
+    await update.message.reply_text(
+        "⚠️ Veux-tu vraiment *effacer définitivement* ton profil, tes préférences "
+        "et tout l'historique de nos échanges ? Cette action est irréversible.",
+        parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+
+
+async def on_gdpr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":")[1]
+    await query.edit_message_reply_markup(None)
+    if action == "cancel":
+        await query.message.reply_text("Annulé, tes données sont conservées.")
+        return
+
+    def _delete():
+        with db_session() as session:
+            return privacy.delete_data(session, query.from_user.id)
+    await asyncio.to_thread(_delete)
+    await query.message.reply_text(
+        "✅ C'est fait : toutes tes données ont été effacées. "
+        "Tu peux repartir de zéro à tout moment avec /start. Prends soin de toi. 🤲")
 
 
 async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -92,7 +155,10 @@ async def cmd_aide(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "en savoir plus, accepter, refuser ou reporter.\n"
         "• /profil — voir ton profil et son niveau de complétude\n"
         "• /pause — suspendre les suggestions\n"
-        "• /reprendre — réactiver les suggestions",
+        "• /reprendre — réactiver les suggestions\n"
+        "• /mesdonnees — voir les données enregistrées sur toi\n"
+        "• /supprimer — effacer définitivement tes données\n"
+        "• /conditions — rappel sur la protection des données",
         parse_mode=ParseMode.MARKDOWN)
 
 
@@ -129,6 +195,27 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return  # l'IA ne répond qu'en privé
     tg_user = update.effective_user
     text = update.message.text
+
+    # Garde-fous RGPD (consentement) + coût (plafond quotidien), en une requête.
+    def _gate() -> str | None:
+        with db_session() as session:
+            user = get_or_create_user(session, tg_user.id, tg_user.username, tg_user.full_name)
+            if config.CONSENT_REQUIRED and user.consented_at is None:
+                return "consent"
+            if privacy.count_messages_today(session, user.telegram_id) >= config.MAX_MESSAGES_PER_DAY:
+                return "limit"
+        return None
+
+    gate = await asyncio.to_thread(_gate)
+    if gate == "consent":
+        await update.message.reply_text(
+            "Avant de commencer, merci de valider les conditions avec /start 🙏")
+        return
+    if gate == "limit":
+        await update.message.reply_text(
+            "Tu as atteint la limite d'échanges pour aujourd'hui 🌙 "
+            "Reviens demain, in shâ Allah — je serai là.")
+        return
 
     def _turn() -> str:
         with db_session() as session:
@@ -445,6 +532,11 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("help", cmd_aide))
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("reprendre", cmd_reprendre))
+    app.add_handler(CommandHandler("conditions", cmd_conditions))
+    app.add_handler(CommandHandler("mesdonnees", cmd_mesdonnees))
+    app.add_handler(CommandHandler("supprimer", cmd_supprimer))
+    app.add_handler(CallbackQueryHandler(on_consent, pattern=r"^consent:"))
+    app.add_handler(CallbackQueryHandler(on_gdpr_button, pattern=r"^gdpr:"))
     app.add_handler(CallbackQueryHandler(on_match_button, pattern=r"^match:"))
     admin_commands.register(app)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

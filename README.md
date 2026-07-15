@@ -38,6 +38,10 @@ via la commande **`/journal [n]`**, ou en ouvrant le fichier
   quotidienne — question de réflexion, sondage, quiz, statistiques anonymisées,
   profil de la semaine, rappel des règles.
 - Commandes : `/start`, `/profil`, `/aide`, `/pause`, `/reprendre`.
+- **RGPD** : consentement demandé au `/start` (`CONSENT_REQUIRED`), `/mesdonnees`
+  (droit d'accès), `/supprimer` (droit à l'effacement), `/conditions` (rappel).
+- **Maîtrise des coûts** : plafond de messages IA par membre et par jour
+  (`MAX_MESSAGES_PER_DAY`, défaut 40) — anti-flood et budget maîtrisé.
 
 ### 🧠 Moteur IA : Claude, Qwen3 local, ou mode guidé
 Le bot fonctionne avec quatre moteurs interchangeables (`LLM_PROVIDER` dans `.env`) :
