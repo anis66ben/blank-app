@@ -16,8 +16,8 @@ from telegram.constants import ParseMode
 from telegram.ext import CommandHandler, ContextTypes
 
 from . import ai, config
-from .db import (AskedQuestion, Match, Message, Preference, Profile, User,
-                 db_session, utcnow)
+from .db import (AskedQuestion, Match, Message, Preference, Profile, Report,
+                 User, db_session, utcnow)
 
 log = logging.getLogger("admin")
 
@@ -29,6 +29,7 @@ HELP_TEXT = (
     "• /matchs — derniers matchs et scores\n"
     "• /conv `<id>` — derniers échanges bot ↔ membre\n"
     "• /journal `[n]` — comportement du modèle (n derniers tours)\n"
+    "• /signalements — signalements en attente de modération\n"
     "• /publier `question|quiz|regles|stats` — publier dans le groupe\n"
 )
 
@@ -222,6 +223,25 @@ async def cmd_journal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 @admin_only
+async def cmd_signalements(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with db_session() as s:
+        names = {p.user_id: (p.pseudo or str(p.user_id)) for p in s.query(Profile).all()}
+        rows = (s.query(Report).filter(Report.status == "open")
+                .order_by(Report.created_at.desc()).limit(15).all())
+        lines = []
+        for r in rows:
+            cible = names.get(r.reported_id, r.reported_id) if r.reported_id else "(général)"
+            lines.append(f"• #{r.id} — {names.get(r.reporter_id, r.reporter_id)} → "
+                         f"*{cible}* ({r.created_at:%d/%m %H:%M})\n"
+                         f"  {r.reason or '—'}\n"
+                         f"  fiche cible : `/fiche {r.reported_id}`" if r.reported_id else
+                         f"• #{r.id} — {names.get(r.reporter_id, r.reporter_id)} : {r.reason or '—'}")
+    await update.message.reply_text(
+        "🚩 *Signalements ouverts*\n\n" + ("\n\n".join(lines) if lines
+        else "Aucun signalement en attente. ✅"), parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
 async def cmd_publier(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not config.COMMUNITY_CHAT_ID:
         await update.message.reply_text(
@@ -254,4 +274,5 @@ def register(app) -> None:
     app.add_handler(CommandHandler("matchs", cmd_matchs))
     app.add_handler(CommandHandler("conv", cmd_conv))
     app.add_handler(CommandHandler("journal", cmd_journal))
+    app.add_handler(CommandHandler("signalements", cmd_signalements))
     app.add_handler(CommandHandler("publier", cmd_publier))

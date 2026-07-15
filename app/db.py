@@ -164,6 +164,18 @@ class MemoryChunk(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
+class Report(Base):
+    """Signalement d'un membre (modération)."""
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.telegram_id"), index=True)
+    reported_id: Mapped[int | None] = mapped_column(ForeignKey("users.telegram_id"), index=True)
+    reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open/reviewed/dismissed
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
 class CommunityPost(Base):
     """Historique des publications d'animation communautaire."""
     __tablename__ = "community_posts"

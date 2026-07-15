@@ -142,10 +142,18 @@ def find_new_matches(session) -> list[Match]:
     women = [p for p in profiles if p.gender == "femme"]
 
     existing = {(m.user_m_id, m.user_f_id) for m in session.query(Match).all()}
+    # Exclut les paires ayant fait l'objet d'un signalement (modération)
+    from .db import Report
+    blocked: set[tuple[int, int]] = set()
+    for r in session.query(Report).filter(Report.reported_id.isnot(None)).all():
+        blocked.add((r.reporter_id, r.reported_id))
+        blocked.add((r.reported_id, r.reporter_id))
     created: list[Match] = []
     for pm in men:
         for pf in women:
             if (pm.user_id, pf.user_id) in existing:
+                continue
+            if (pm.user_id, pf.user_id) in blocked:
                 continue
             if not hard_filters_ok(pm, pf):
                 continue

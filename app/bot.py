@@ -17,8 +17,8 @@ from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
                           ContextTypes, MessageHandler, filters)
 
 from . import admin_commands, ai, config, matching, privacy
-from .db import (AskedQuestion, CommunityPost, Match, Message, Profile, User,
-                 db_session, get_or_create_user, utcnow)
+from .db import (AskedQuestion, CommunityPost, Match, Message, Profile, Report,
+                 User, db_session, get_or_create_user, utcnow)
 from .profile_schema import FIELD_LABELS
 
 logging.basicConfig(level=logging.INFO,
@@ -86,6 +86,30 @@ async def on_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def cmd_conditions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(privacy.CONSENT_TEXT, parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_signaler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    reason = " ".join(context.args).strip() if context.args else ""
+    if not reason:
+        await update.message.reply_text(
+            "Pour signaler un problème ou un comportement déplacé, écris :\n"
+            "/signaler suivi de ta description.\n"
+            "Exemple : /signaler propos déplacés de la personne mise en relation.")
+        return
+    reporter_id = update.effective_user.id
+
+    def _save():
+        with db_session() as session:
+            get_or_create_user(session, reporter_id, update.effective_user.username,
+                               update.effective_user.full_name)
+            session.add(Report(reporter_id=reporter_id, reported_id=None, reason=reason[:1000]))
+    await asyncio.to_thread(_save)
+    await update.message.reply_text(
+        "🚩 Merci, ton signalement a bien été transmis à la modération. "
+        "Nous le traiterons avec attention.")
+    await _notify_admins(context,
+                         f"🚩 Signalement de {reporter_id} : {reason[:500]}\n"
+                         f"À examiner avec /signalements.")
 
 
 async def cmd_mesdonnees(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -268,7 +292,16 @@ def _match_keyboard(match_id: int) -> InlineKeyboardMarkup:
          InlineKeyboardButton("✅ Accepter", callback_data=f"match:{match_id}:accepted")],
         [InlineKeyboardButton("❌ Refuser", callback_data=f"match:{match_id}:refused"),
          InlineKeyboardButton("🕐 Plus tard", callback_data=f"match:{match_id}:postponed")],
+        [InlineKeyboardButton("🚩 Signaler ce profil", callback_data=f"match:{match_id}:report")],
     ])
+
+
+async def _notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    for admin_id in config.ADMIN_TELEGRAM_IDS:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text)
+        except TelegramError:
+            pass
 
 
 async def job_matching(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -328,6 +361,25 @@ async def on_match_button(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     match, other_profile, other_user = await asyncio.to_thread(_apply)
     if match is None:
         await query.edit_message_reply_markup(None)
+        return
+
+    if response == "report":
+        def _report():
+            with db_session() as session:
+                m = session.get(Match, match_id)
+                other = m.user_f_id if responder_id == m.user_m_id else m.user_m_id
+                session.add(Report(reporter_id=responder_id, reported_id=other,
+                                   reason="Signalement via une suggestion de profil"))
+                matching.register_response(session, m, responder_id, "refused")
+                return other
+        reported = await asyncio.to_thread(_report)
+        await query.edit_message_reply_markup(None)
+        await query.message.reply_text(
+            "🚩 Merci, ce profil a été signalé à la modération et ne te sera plus "
+            "proposé. Nous prenons ces signalements au sérieux.")
+        await _notify_admins(context,
+                             f"🚩 Signalement : {responder_id} a signalé {reported} "
+                             f"(via suggestion). À examiner avec /signalements.")
         return
 
     if response == "info":
@@ -535,6 +587,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("conditions", cmd_conditions))
     app.add_handler(CommandHandler("mesdonnees", cmd_mesdonnees))
     app.add_handler(CommandHandler("supprimer", cmd_supprimer))
+    app.add_handler(CommandHandler("signaler", cmd_signaler))
     app.add_handler(CallbackQueryHandler(on_consent, pattern=r"^consent:"))
     app.add_handler(CallbackQueryHandler(on_gdpr_button, pattern=r"^gdpr:"))
     app.add_handler(CallbackQueryHandler(on_match_button, pattern=r"^match:"))

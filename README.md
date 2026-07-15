@@ -223,6 +223,25 @@ Tout est isolé dans `/opt/rencontre` (utilisateur système dédié, venv propre
 port choisi automatiquement parmi les ports libres) : aucune interférence avec
 d'autres applications présentes sur le serveur.
 
+## Modération
+
+- Bouton **🚩 Signaler** sur chaque suggestion de profil, et commande
+  **`/signaler <description>`** pour tout comportement déplacé.
+- Un signalement **exclut définitivement la paire** du moteur de matching.
+- Les administrateurs sont notifiés en temps réel et disposent de
+  **`/signalements`** (Telegram) pour la revue.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+Le socle (`tests/`) couvre la complétude des profils, le moteur de matching
+(filtres, score, machine à états, exclusion par signalement), le RGPD (plafond,
+export, suppression) et le mode guidé + extraction JSON. Base SQLite jetable,
+aucun appel réseau.
+
 ## Respect des données personnelles
 
 - L'accès aux conversations depuis le dashboard est réservé à la modération
