@@ -111,6 +111,11 @@ Réglages : `RAG_ENABLED`, `RAG_TOP_K`, `EMBED_MODEL` dans `.env`.
 - **Importantes** (70 pts) : pratique religieuse, projet de famille,
   localisation, personnalité.
 - **Secondaires** (30 pts) : centres d'intérêt, habitudes de vie, proximité d'âge.
+- **Critères recherchés explicites** (bonus/malus ±16) : ce que *chaque personne
+  déclare rechercher* chez un conjoint (âge, localisation, pratique religieuse,
+  projet d'enfants, qualités) — vérifié **dans les deux sens**.
+- **Préférences déduites** des réactions aux profils (charte §11).
+- **Pondérations ajustables** sans toucher au code (`MATCH_W_*` dans `.env`).
 - Chaque paire reçoit un **score 0-100** avec décomposition consultable dans le
   dashboard.
 

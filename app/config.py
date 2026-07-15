@@ -65,6 +65,18 @@ ADMIN_TELEGRAM_IDS = {int(x) for x in os.getenv("ADMIN_TELEGRAM_IDS", "")
 MATCH_THRESHOLD = int(os.getenv("MATCH_THRESHOLD", "65"))
 MIN_COMPLETENESS_FOR_MATCHING = int(os.getenv("MIN_COMPLETENESS_FOR_MATCHING", "30"))
 
+# Pondérations du matching (ajustables sans toucher au code). La somme fait 100 ;
+# les critères recherchés explicites ajoutent un bonus/malus (±16) par-dessus.
+MATCH_WEIGHTS = {
+    "pratique_religieuse": float(os.getenv("MATCH_W_RELIGION", "25")),
+    "projet_famille": float(os.getenv("MATCH_W_FAMILY", "20")),
+    "localisation": float(os.getenv("MATCH_W_LOCATION", "15")),
+    "personnalite": float(os.getenv("MATCH_W_PERSONALITY", "10")),
+    "centres_interet": float(os.getenv("MATCH_W_INTERESTS", "18")),
+    "habitudes_vie": float(os.getenv("MATCH_W_LIFESTYLE", "7")),
+    "proximite_age": float(os.getenv("MATCH_W_AGE", "5")),
+}
+
 # Nombre de messages d'historique envoyés au modèle à chaque tour
 CONVERSATION_WINDOW = int(os.getenv("CONVERSATION_WINDOW", "30"))
 # Fenêtre d'historique pour les petits modèles locaux (mlx) : plus courte que

@@ -163,6 +163,12 @@ def user_detail(telegram_id: int) -> dict:
             "lifestyle_facts": p.lifestyle_facts or [],
             "memory_notes": p.memory_notes or [],
             "asked_topics": topics,
+            "sought": {
+                "age_min": p.sought_age_min, "age_max": p.sought_age_max,
+                "location": p.sought_location, "religious": p.sought_religious,
+                "wants_children": p.sought_wants_children,
+                "qualities": p.sought_qualities or [],
+            },
             "preferences": [{
                 "dimension": pr.dimension, "key": pr.key,
                 "orientation": pr.orientation, "score": pr.score,

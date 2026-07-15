@@ -75,6 +75,14 @@ class Profile(Base):
     lifestyle_facts: Mapped[list | None] = mapped_column(JSON, default=list)
     memory_notes: Mapped[list | None] = mapped_column(JSON, default=list)
 
+    # Critères RECHERCHÉS chez le futur conjoint (déclarés par la personne)
+    sought_age_min: Mapped[int | None] = mapped_column(Integer)
+    sought_age_max: Mapped[int | None] = mapped_column(Integer)
+    sought_location: Mapped[str | None] = mapped_column(String(255))       # ex: "en France", "près de Paris"
+    sought_religious: Mapped[str | None] = mapped_column(String(255))      # pratique attendue
+    sought_wants_children: Mapped[bool | None] = mapped_column(Boolean)
+    sought_qualities: Mapped[list | None] = mapped_column(JSON, default=list)  # valeurs/traits attendus
+
     completeness: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -219,7 +227,14 @@ def _ensure_columns(engine) -> None:
     (SQLite/PostgreSQL supportent ADD COLUMN). Évite les incohérences quand le
     schéma évolue, en attendant un vrai outil de migration (Alembic)."""
     from sqlalchemy import inspect, text
-    wanted = {"users": {"consented_at": "DATETIME"}}
+    wanted = {
+        "users": {"consented_at": "DATETIME"},
+        "profiles": {
+            "sought_age_min": "INTEGER", "sought_age_max": "INTEGER",
+            "sought_location": "VARCHAR(255)", "sought_religious": "VARCHAR(255)",
+            "sought_wants_children": "BOOLEAN", "sought_qualities": "JSON",
+        },
+    }
     insp = inspect(engine)
     with engine.begin() as conn:
         for table, cols in wanted.items():

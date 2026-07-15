@@ -82,6 +82,12 @@ FIELD_LABELS = {
     "personality_traits": "traits de personnalité",
     "interests": "centres d'intérêt",
     "lifestyle_facts": "habitudes de vie",
+    "sought_age_min": "âge minimum recherché",
+    "sought_age_max": "âge maximum recherché",
+    "sought_location": "localisation recherchée",
+    "sought_religious": "pratique religieuse recherchée",
+    "sought_wants_children": "conjoint souhaitant des enfants",
+    "sought_qualities": "qualités recherchées chez le conjoint",
 }
 
 
@@ -141,6 +147,14 @@ class ProfileUpdates(BaseModel):
     interests: List[str] = Field(default_factory=list)
     lifestyle_facts: List[str] = Field(default_factory=list,
                                        description="Habitudes de vie, ex: 'sportif', 'ne fume pas'")
+    # Critères RECHERCHÉS chez le futur conjoint (ce que la personne veut chez l'autre)
+    sought_age_min: Optional[int] = Field(None, description="Âge minimum souhaité chez le conjoint")
+    sought_age_max: Optional[int] = Field(None, description="Âge maximum souhaité chez le conjoint")
+    sought_location: Optional[str] = Field(None, description="Localisation souhaitée du conjoint, ex: 'en France'")
+    sought_religious: Optional[str] = Field(None, description="Pratique religieuse attendue chez le conjoint")
+    sought_wants_children: Optional[bool] = Field(None, description="Souhaite un conjoint qui veut des enfants")
+    sought_qualities: List[str] = Field(default_factory=list,
+                                        description="Qualités/valeurs recherchées chez le conjoint")
 
 
 class PreferenceSignal(BaseModel):

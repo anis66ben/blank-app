@@ -60,6 +60,59 @@ def _practice_level(profile: Profile) -> int | None:
     return best if best else 2  # pratique mentionnée sans précision -> moyen
 
 
+def _tokens(text: str | None) -> set[str]:
+    return {w for w in _norm(text).split() if len(w) >= 4}
+
+
+def sought_score(seeker: Profile, cand: Profile) -> tuple[float, list[str]]:
+    """Dans quelle mesure `cand` satisfait les critères EXPLICITEMENT recherchés
+    par `seeker` chez un conjoint. Renvoie (points ∈ [-8, +8], justifications)."""
+    pts = 0.0
+    reasons: list[str] = []
+
+    # Âge souhaité (critère fort quand il est déclaré)
+    if (seeker.sought_age_min or seeker.sought_age_max) and cand.age is not None:
+        lo = seeker.sought_age_min or 0
+        hi = seeker.sought_age_max or 200
+        if lo <= cand.age <= hi:
+            pts += 4; reasons.append("âge dans la fourchette souhaitée")
+        else:
+            pts -= 4; reasons.append("âge hors fourchette souhaitée")
+
+    # Projet d'enfants attendu
+    if seeker.sought_wants_children is not None and cand.wants_children is not None:
+        if seeker.sought_wants_children == cand.wants_children:
+            pts += 3; reasons.append("projet d'enfants concordant")
+        else:
+            pts -= 3; reasons.append("projet d'enfants divergent")
+
+    # Pratique religieuse attendue (recouvrement de mots-clés)
+    if seeker.sought_religious and cand.religious_practice:
+        if _tokens(seeker.sought_religious) & _tokens(cand.religious_practice):
+            pts += 3; reasons.append("pratique religieuse conforme au souhait")
+
+    # Localisation souhaitée
+    if seeker.sought_location:
+        want = _norm(seeker.sought_location)
+        if any(w in want for w in ("peu importe", "partout", "aucune")):
+            pass
+        elif (_norm(cand.city) and _norm(cand.city) in want) or \
+             (_norm(cand.country) and _norm(cand.country) in want):
+            pts += 2; reasons.append("localisation conforme au souhait")
+
+    # Qualités recherchées (vs personnalité + intérêts + habitudes du candidat)
+    q = _norm_set(seeker.sought_qualities)
+    if q:
+        have = _norm_set((cand.personality_traits or []) + (cand.interests or [])
+                         + (cand.lifestyle_facts or []))
+        inter = len(q & have)
+        if inter:
+            pts += min(inter * 1.5, 4)
+            reasons.append(f"{inter} qualité(s) recherchée(s) présente(s)")
+
+    return max(min(pts, 8.0), -8.0), reasons
+
+
 def hard_filters_ok(pm: Profile, pf: Profile) -> bool:
     """Compatibilités obligatoires. pm = profil homme, pf = profil femme."""
     if pm.gender != "homme" or pf.gender != "femme":
@@ -79,55 +132,53 @@ def hard_filters_ok(pm: Profile, pf: Profile) -> bool:
 
 
 def compatibility(pm: Profile, pf: Profile) -> tuple[float, dict]:
-    """Score 0-100 + décomposition. Suppose les filtres obligatoires passés."""
+    """Score 0-100 + décomposition. Suppose les filtres obligatoires passés.
+    Chaque dimension = fraction (0..1) × pondération configurable (config.MATCH_WEIGHTS)."""
+    W = config.MATCH_WEIGHTS
     details: dict[str, float] = {}
 
-    # --- Importantes (70) ---
-    # Pratique religieuse (25)
+    # Pratique religieuse
     lm, lf = _practice_level(pm), _practice_level(pf)
     if lm is None or lf is None:
-        religion = 12.0                      # inconnu -> neutre
+        frac = 0.5                              # inconnu -> neutre
     else:
-        religion = 25.0 - abs(lm - lf) * 10  # même niveau: 25, écart max: 5
-    details["pratique_religieuse"] = max(religion, 0)
+        frac = max(1 - abs(lm - lf) * 0.4, 0.2)  # même niveau: 1, écart max: 0.2
+    details["pratique_religieuse"] = round(frac * W["pratique_religieuse"], 1)
 
-    # Projet de famille (20)
-    family = 0.0
-    if pm.wants_children is not None and pf.wants_children is not None:
-        family += 14 if pm.wants_children == pf.wants_children else 0
-    else:
-        family += 7
+    # Projet de famille
+    frac = 0.0
+    frac += (0.7 if pm.wants_children == pf.wants_children else 0.0) \
+        if (pm.wants_children is not None and pf.wants_children is not None) else 0.35
     if pm.children_count_desired and pf.children_count_desired:
-        family += max(6 - abs(pm.children_count_desired - pf.children_count_desired) * 2, 0)
+        frac += max(0.3 - abs(pm.children_count_desired - pf.children_count_desired) * 0.1, 0)
     else:
-        family += 3
-    details["projet_famille"] = family
+        frac += 0.15
+    details["projet_famille"] = round(frac * W["projet_famille"], 1)
 
-    # Localisation (15)
+    # Localisation
     if _norm(pm.city) and _norm(pm.city) == _norm(pf.city):
-        loc = 15.0
+        frac = 1.0
     elif _norm(pm.department) and _norm(pm.department) == _norm(pf.department):
-        loc = 12.0
+        frac = 0.8
     elif _norm(pm.country) and _norm(pm.country) == _norm(pf.country):
-        loc = 8.0
+        frac = 0.53
     elif not pm.country or not pf.country:
-        loc = 4.0
+        frac = 0.27
     else:
-        loc = 0.0
-    details["localisation"] = loc
+        frac = 0.0
+    details["localisation"] = round(frac * W["localisation"], 1)
 
-    # Personnalité (10) — recouvrement des traits déclarés
-    details["personnalite"] = round(_overlap_score(pm.personality_traits,
-                                                   pf.personality_traits) * 10, 1)
+    # Personnalité, centres d'intérêt, habitudes de vie
+    details["personnalite"] = round(
+        _overlap_score(pm.personality_traits, pf.personality_traits) * W["personnalite"], 1)
+    details["centres_interet"] = round(
+        _overlap_score(pm.interests, pf.interests) * W["centres_interet"], 1)
+    details["habitudes_vie"] = round(
+        _overlap_score(pm.lifestyle_facts, pf.lifestyle_facts) * W["habitudes_vie"], 1)
 
-    # Écart d'âge (bonus dans la partie importante, déjà filtré) — intégré à
-    # la localisation/personnalité ? Non : petit ajustement via secondaires.
-
-    # --- Secondaires (30) ---
-    details["centres_interet"] = round(_overlap_score(pm.interests, pf.interests) * 18, 1)
-    details["habitudes_vie"] = round(_overlap_score(pm.lifestyle_facts, pf.lifestyle_facts) * 7, 1)
+    # Proximité d'âge
     age_gap = abs((pm.age or 0) - (pf.age or 0))
-    details["proximite_age"] = round(max(5 - age_gap * 0.8, 0), 1)
+    details["proximite_age"] = round(max(1 - age_gap * 0.16, 0) * W["proximite_age"], 1)
 
     score = round(min(sum(details.values()), 100), 1)
     return score, details
@@ -158,6 +209,15 @@ def find_new_matches(session) -> list[Match]:
             if not hard_filters_ok(pm, pf):
                 continue
             score, details = compatibility(pm, pf)
+
+            # Critères RECHERCHÉS explicitement (P2) : chacun doit satisfaire les
+            # attentes déclarées de l'autre. Bidirectionnel.
+            sm, sreasons_m = sought_score(pm, pf)   # F satisfait-elle les critères de M ?
+            sf, sreasons_f = sought_score(pf, pm)   # M satisfait-il les critères de F ?
+            if sm or sf:
+                details["criteres_recherches"] = round(sm + sf, 1)
+                details["criteres_detail"] = {"homme": sreasons_m, "femme": sreasons_f}
+                score = round(max(min(score + sm + sf, 100), 0), 1)
 
             # Préférences déduites des réactions (charte §11) : les préférences
             # confirmées de chacun ajustent le score face au profil de l'autre.

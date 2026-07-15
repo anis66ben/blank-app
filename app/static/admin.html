@@ -255,6 +255,11 @@ async function showUser(id) {
     ["Personnalité", (u.personality_traits || []).join(", ")],
     ["Centres d'intérêt", (u.interests || []).join(", ")],
     ["Habitudes de vie", (u.lifestyle_facts || []).join(", ")],
+    ["Recherche un(e) conjoint(e)", u.sought ?
+      `${u.sought.age_min || "?"}-${u.sought.age_max || "?"} ans · ${fmt(u.sought.location)} · ` +
+      `pratique : ${fmt(u.sought.religious)} · enfants : ` +
+      (u.sought.wants_children === null ? "—" : u.sought.wants_children ? "oui" : "non") +
+      ` · qualités : ${(u.sought.qualities || []).join(", ") || "—"}` : "—"],
     ["Notes mémorisées par le bot", (u.memory_notes || []).join(" · ")],
     ["Sujets déjà abordés", (u.asked_topics || []).join(", ")],
     ["Préférences apprises (réactions)", (u.preferences || []).map(p =>

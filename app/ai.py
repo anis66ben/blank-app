@@ -47,6 +47,12 @@ def profile_snapshot(profile: Profile) -> dict:
         "personnalite": profile.personality_traits or [],
         "centres_interet": profile.interests or [],
         "habitudes_vie": profile.lifestyle_facts or [],
+        "recherche_conjoint": {
+            "age_min": profile.sought_age_min, "age_max": profile.sought_age_max,
+            "localisation": profile.sought_location, "pratique": profile.sought_religious,
+            "veut_enfants": profile.sought_wants_children,
+            "qualites": profile.sought_qualities or [],
+        },
         "notes_memorisees": profile.memory_notes or [],
         "indice_connaissance": profile.completeness,
     }
@@ -209,7 +215,9 @@ def apply_updates(profile: Profile, turn: BotTurn) -> None:
     scalar_fields = ["pseudo", "gender", "birth_place", "city", "department", "country",
                      "profession", "education", "marital_status", "marriage_timeline",
                      "wants_children", "children_count_desired", "religious_practice",
-                     "mosque_attendance", "religious_education", "age_estimate"]
+                     "mosque_attendance", "religious_education", "age_estimate",
+                     "sought_age_min", "sought_age_max", "sought_location",
+                     "sought_religious", "sought_wants_children"]
     for field in scalar_fields:
         value = getattr(u, field, None)
         if value is not None and str(value).strip() != "":
@@ -224,6 +232,7 @@ def apply_updates(profile: Profile, turn: BotTurn) -> None:
     for list_field, new_items in [("personality_traits", u.personality_traits),
                                   ("interests", u.interests),
                                   ("lifestyle_facts", u.lifestyle_facts),
+                                  ("sought_qualities", u.sought_qualities),
                                   ("memory_notes", turn.memory_notes)]:
         if new_items:
             current = list(getattr(profile, list_field) or [])
